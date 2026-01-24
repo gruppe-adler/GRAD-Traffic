@@ -77,8 +77,8 @@ class SCR_CivilianTrafficObserver : ScriptComponent
 	            
 	            StartFleeing(owner);
 	            
-	            // Reset panic state after 15 seconds
-	            GetGame().GetCallqueue().CallLater(ResetPanic, 15000);
+	            // Reset panic state after 60 seconds
+	            GetGame().GetCallqueue().CallLater(ResetPanic, 60000);
 	        }
 	    }
 	}
@@ -121,8 +121,49 @@ class SCR_CivilianTrafficObserver : ScriptComponent
 	        escapeWp.SetCompletionType(EAIWaypointCompletionType.Any);
 	        
 	        group.AddWaypoint(escapeWp);
+			
+			Vehicle vehicle = GetVehicle(owner);
+		    if (!vehicle) return;
+			
+			CarControllerComponent carController = CarControllerComponent.Cast(owner.FindComponent(CarControllerComponent));
+   			if (!carController) return;
+			carController.SetPersistentHandBrake(true);
+			
+			GetGame().GetCallqueue().CallLater(ReleaseHandbrake, 2000, false, carController);
+			
 	    }
+	}
+	
+	protected void ReleaseHandbrake(CarControllerComponent carController)
+	{
+	    if (!carController)
+	        return;
+	
+	    carController.SetPersistentHandBrake(false);
+	    Print("[TRAFFIC DEBUG] Handbrake RELEASED - Flooring it", LogLevel.NORMAL);
 	}
 
     protected void ResetPanic() { m_bPanicked = false; }
+	
+	protected Vehicle GetVehicle(IEntity owner)
+	{
+		if (!owner)
+			return null;
+	
+		// 1. Get the component that handles AI sitting in seats
+		SCR_CompartmentAccessComponent compartmentAccess = SCR_CompartmentAccessComponent.Cast(owner.FindComponent(SCR_CompartmentAccessComponent));
+		if (!compartmentAccess)
+			return null;
+	
+		// 2. Get the specific seat (compartment) the AI is in
+		BaseCompartmentSlot slot = compartmentAccess.GetCompartment();
+		if (!slot)
+			return null;
+	
+		// 3. Get the entity that owns that seat (the Vehicle)
+		IEntity vehicleEnt = slot.GetOwner();
+		
+		// 4. Safe cast to Vehicle type
+		return Vehicle.Cast(vehicleEnt);
+	}
 }
