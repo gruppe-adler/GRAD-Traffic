@@ -125,7 +125,7 @@ class SCR_CivilianTrafficObserver : ScriptComponent
 			Vehicle vehicle = GetVehicle(owner);
 		    if (!vehicle) return;
 			
-			CarControllerComponent carController = CarControllerComponent.Cast(owner.FindComponent(CarControllerComponent));
+			CarControllerComponent carController = CarControllerComponent.Cast(vehicle.FindComponent(CarControllerComponent));
    			if (!carController) return;
 			carController.SetPersistentHandBrake(true);
 			
