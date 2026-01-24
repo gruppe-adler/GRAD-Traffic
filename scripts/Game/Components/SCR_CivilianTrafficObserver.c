@@ -5,17 +5,17 @@ class SCR_CivilianTrafficObserver : ScriptComponent
 {
     protected bool m_bPanicked = false;
     protected bool m_bKilled = false;
+	protected SCR_CharacterDamageManagerComponent m_pDamageManager;
 
     override void OnPostInit(IEntity owner)
     {
         if (!Replication.IsServer()) return;
 
-        // Use SCR_CharacterDamageManager for characters
-        SCR_CharacterDamageManagerComponent dmg = SCR_CharacterDamageManagerComponent.Cast(owner.FindComponent(SCR_CharacterDamageManagerComponent));
-        if (dmg)
+        m_pDamageManager = SCR_CharacterDamageManagerComponent.Cast(owner.FindComponent(SCR_CharacterDamageManagerComponent));
+        if (m_pDamageManager)
         {
             // IMPORTANT: Match this signature below
-            dmg.GetOnDamageStateChanged().Insert(OnDamageStateChanged);
+            m_pDamageManager.GetOnDamageStateChanged().Insert(OnDamageStateChanged);
         }
 
         // Start checking for suppression (panic)
@@ -23,12 +23,16 @@ class SCR_CivilianTrafficObserver : ScriptComponent
     }
 
     // This is the specific signature the engine invoker requires
-    // Param 1: EDamageState (int)
-    // Param 2: EDamageState (int)
+    // Param 1: EDamageState (Enum)
+    // Param 2: EDamageState (Enum)
     // Param 3: bool (isJIP)
-    protected void OnDamageStateChanged(EDamageState newState, EDamageState previousState, bool isJIP)
+	
+    void OnDamageStateChanged()
     {
-        if (!m_bKilled && newState == EDamageState.DESTROYED)
+        if (m_bKilled || !m_pDamageManager) return;
+
+        // Since the invoker didn't give us the state, we ask the manager for it manually
+        if (m_pDamageManager.GetState() == EDamageState.DESTROYED)
         {
             m_bKilled = true;
             SCR_TrafficEvents.OnCivilianEvent.Invoke(GetOwner().GetOrigin(), "killed");
@@ -37,25 +41,47 @@ class SCR_CivilianTrafficObserver : ScriptComponent
     }
 
     protected void ListenToSuppression(IEntity owner)
-    {
-        SignalsManagerComponent signals = SignalsManagerComponent.Cast(owner.FindComponent(SignalsManagerComponent));
-        if (!signals) return;
-
-        int sigIdx = signals.FindSignal("Suppression");
-        if (sigIdx != -1 && signals.GetSignalValue(sigIdx) > 0.2)
-        {
-            if (!m_bPanicked)
-            {
-                m_bPanicked = true;
-                SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
-                Print("[TRAFFIC DEBUG] Panic Event Fired", LogLevel.NORMAL);
-                
-                // Optional: Start Flee Logic here
-                
-                GetGame().GetCallqueue().CallLater(ResetPanic, 15000);
-            }
-        }
-    }
+	{
+	    // 1. Get the Combat Component from the entity
+	    SCR_AICombatComponent combatComp = SCR_AICombatComponent.Cast(owner.FindComponent(SCR_AICombatComponent));
+	    if (!combatComp) 
+	        return;
+	
+	    // 2. Get the Agent and its Utility Component to access the Threat System
+	    SCR_ChimeraAIAgent agent = combatComp.GetAiAgent();
+	    if (!agent)
+	        return;
+	
+	    SCR_AIUtilityComponent utility = SCR_AIUtilityComponent.Cast(agent.FindComponent(SCR_AIUtilityComponent));
+	    if (!utility || !utility.m_ThreatSystem)
+	        return;
+	
+	    // 3. Check the Threat Measure (Supression equivalent)
+	    // A value > 0.2 indicates the AI is actively taking fire or under stress
+	    float threatMeasure = utility.m_ThreatSystem.GetThreatMeasure();
+	    
+	    // Also check if the state is explicitly THREATENED (Suppressed)
+	    bool isThreatened = (utility.m_ThreatSystem.GetState() == EAIThreatState.THREATENED);
+		
+		Print(string.Format("[TRAFFIC DEBUG] isThreatened: %1", isThreatened), LogLevel.NORMAL);
+	
+	    if (threatMeasure > 0.2 || isThreatened)
+	    {
+	        if (!m_bPanicked)
+	        {
+	            m_bPanicked = true;
+	            
+	            // Fire the Civilian Event
+	            SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
+	            Print(string.Format("[TRAFFIC DEBUG] Panic Event Fired. Threat Level: %1", threatMeasure), LogLevel.NORMAL);
+	            
+	            StartFleeing(owner);
+	            
+	            // Reset panic state after 15 seconds
+	            GetGame().GetCallqueue().CallLater(ResetPanic, 15000);
+	        }
+	    }
+	}
 	
 	protected void StartFleeing(IEntity owner)
 	{
