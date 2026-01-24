@@ -3,10 +3,10 @@ class SCR_AmbientTrafficManagerClass : ScriptComponentClass
 {
 }
 
-// Global event hook
 class SCR_TrafficEvents
 {
-    static ref ScriptInvoker<IEntity, vector> OnCivilianPanic = new ScriptInvoker<IEntity, vector>();
+    // Global hook: (Position, "gunfight" or "killed")
+    static ref ScriptInvoker<vector, string> OnCivilianEvent = new ScriptInvoker<vector, string>();
 }
 
 class SCR_AmbientTrafficManager : ScriptComponent
@@ -55,15 +55,13 @@ class SCR_AmbientTrafficManager : ScriptComponent
     // ------------------------------------------------------------------------------------------------
     // 2. The Main Loop
     // ------------------------------------------------------------------------------------------------
+
     protected void UpdateTrafficLoop()
     {
         CleanupTraffic();
-        Print(string.Format("[TRAFFIC] Active Vehicles: %1", m_aActiveVehicles.Count()), LogLevel.NORMAL); 
         
         if (m_aActiveVehicles.Count() < m_iMaxVehicles)
-        {
             SpawnSingleTrafficUnit();
-        }
     }
 
     protected void SpawnSingleTrafficUnit()
@@ -126,7 +124,6 @@ class SCR_AmbientTrafficManager : ScriptComponent
              return;
         }
 		
-
         
         // 4. Link Agent to Group
         AIControlComponent aiControl = AIControlComponent.Cast(drvEnt.FindComponent(AIControlComponent));
@@ -394,15 +391,16 @@ class SCR_AmbientTrafficManager : ScriptComponent
     }
 
     protected void OnDriverPanic(IEntity owner)
-    {
-        Print("[TRAFFIC EVENT] PANIC! Driver reacting.", LogLevel.WARNING);
-        SCR_TrafficEvents.OnCivilianPanic.Invoke(owner, owner.GetOrigin());
-    }
-
+	{
+	    Print("[TRAFFIC EVENT] PANIC! Driver reacting.", LogLevel.WARNING);
+	    // CHANGE THIS LINE:
+	    SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
+	}
+	
     protected vector GetRandomMapPos()
     {
         vector mapMin, mapMax;
         GetGame().GetWorldEntity().GetWorldBounds(mapMin, mapMax);
         return Vector(Math.RandomFloat(mapMin[0], mapMax[0]), 0, Math.RandomFloat(mapMin[2], mapMax[2]));
-    }
+    }	
 }
