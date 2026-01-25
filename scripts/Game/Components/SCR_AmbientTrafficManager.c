@@ -530,37 +530,44 @@ class SCR_AmbientTrafficManager : ScriptComponent
     // 4. Helpers
     // ------------------------------------------------------------------------------------------------
     protected bool FindValidRoadPoints(out vector spawn, out vector dest)
-    {
-        for(int i = 0; i < 15; i++) // Increased attempts for long distance
-        {
-            vector sPos = GetRandomMapPos();
-            BaseRoad r1 = GetNearestRoad(sPos, 500); 
-            if (!r1) continue;
-
-            array<vector> p1 = {};
-            r1.GetPoints(p1);
-            spawn = p1[0];
-            
-            vector dPos = GetRandomMapPos();
-            
-            // Check Requirement: Distance at least 2000m
-            if (vector.Distance(spawn, dPos) < 2000) 
-                continue;
-
-            BaseRoad r2 = GetNearestRoad(dPos, 500);
-            if (r2)
-            {
-                array<vector> p2 = {};
-                r2.GetPoints(p2);
-                if (!p2.IsEmpty()) 
-                {
-                    dest = p2[0];
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
+	{
+	    SCR_AIWorld aiWorld = SCR_AIWorld.Cast(GetGame().GetAIWorld());
+	    if (!aiWorld) return false;
+	    
+	    RoadNetworkManager roadMgr = aiWorld.GetRoadNetworkManager();
+	    if (!roadMgr) return false;
+	
+	    for(int i = 0; i < 15; i++) 
+	    {
+	        // 1. Pick a random start
+	        vector sPos = GetRandomMapPos();
+	        BaseRoad r1;
+	        float dist1;
+	        if (roadMgr.GetClosestRoad(sPos, r1, dist1) == -1) continue;
+	
+	        array<vector> p1 = {};
+	        r1.GetPoints(p1);
+	        spawn = p1[0];
+	        
+	        // 2. Pick a random destination
+	        vector dPos = GetRandomMapPos();
+	        if (vector.Distance(spawn, dPos) < 2000) continue;
+	
+	        // 3. THE REACHABILITY TEST
+	        // We ask the manager: "Find a spot on a road near dPos reachable from spawn"
+	        vector validDestPos;
+	        float searchRadius = 500.0; // How far from dPos we're willing to look for a road
+	        
+	        if (roadMgr.GetReachableWaypointInRoad(spawn, dPos, searchRadius, validDestPos))
+	        {
+	            dest = validDestPos;
+	            return true; // Connection confirmed!
+	        }
+	        
+	        Print(string.Format("[TRAFFIC] Road at %1 is not reachable from %2 (Water or Gap). Retrying...", dPos, spawn), LogLevel.DEBUG);
+	    }
+	    return false;
+	}
 
     // Optimized Helper
     protected BaseRoad GetNearestRoad(vector center, float radius)
