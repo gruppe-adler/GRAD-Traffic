@@ -15,6 +15,12 @@ class MY_MissionHeader : SCR_MissionHeader
 
     [Attribute("1", desc: "If true, pulls all vehicles from the target faction's catalog.")]
     bool m_bUseCatalog;
+	
+	[Attribute("1", desc: "Show debug path markers on the map?")]
+	bool m_bShowDebugMarkers;
+	
+	[Attribute(desc: "Safe zone around players where despawn cannot happen", defvalue: "400")]
+    float m_fPlayerSafeRadius;
 }
 
 [ComponentEditorProps(category: "Traffic System", description: "Attach this to your GameMode entity.")]
@@ -52,6 +58,9 @@ class SCR_AmbientTrafficManager : ScriptComponent
 
     // Tracking
     protected ref array<Vehicle> m_aActiveVehicles = {};
+    protected ref map<Vehicle, vector> m_mVehicleDestinations = new map<Vehicle, vector>(); // Track dest for dynamic lines
+    protected ref array<ref Shape> m_aDebugShapes = {};
+	protected float m_fPlayerSafeRadius = 400.0;
 
     // ------------------------------------------------------------------------------------------------
     // 1. Initialization
@@ -72,6 +81,7 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	        m_iMaxVehicles = header.m_iMaxTrafficCount;
 	        m_fDespawnDistance = header.m_fTrafficSpawnRange;
 	        factionToUse = header.m_sTargetFaction;
+			m_fPlayerSafeRadius = header.m_fPlayerSafeRadius;
 	
 	        if (header.m_bUseCatalog)
 	        {
@@ -87,7 +97,7 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	    }
 	
 	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2", m_aVehicleOptions.Count(), factionToUse));
-	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 5000, true);
+	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
 	}
 		
 	protected void GetVehiclesFromCatalog(string targetFactionKey, out array<ResourceName> outPrefabs)
@@ -147,10 +157,15 @@ class SCR_AmbientTrafficManager : ScriptComponent
         
         if (m_aActiveVehicles.Count() < m_iMaxVehicles)
             SpawnSingleTrafficUnit();
+
+        #ifdef WORKBENCH
+        UpdateDebugLines();
+        #endif
     }
 
     protected void SpawnSingleTrafficUnit()
     {
+	
         if (m_aVehicleOptions.IsEmpty())
         {
             Print("[TRAFFIC ERROR] No vehicle prefabs in the list!", LogLevel.ERROR);
@@ -198,6 +213,9 @@ class SCR_AmbientTrafficManager : ScriptComponent
              SCR_EntityHelper.DeleteEntityAndChildren(group);
              return;
         }
+		
+		m_aActiveVehicles.Insert(vehicle);
+        m_mVehicleDestinations.Insert(vehicle, destPos);
         
         // 3. Spawn Driver
         IEntity drvEnt = GetGame().SpawnEntityPrefab(Resource.Load(m_DriverPrefab), GetGame().GetWorld(), params);
@@ -268,6 +286,22 @@ class SCR_AmbientTrafficManager : ScriptComponent
 
         m_aActiveVehicles.Insert(vehicle);
         Print(string.Format("[TRAFFIC] Spawned %1 at %2 (Heading to %3)", vehicle.GetName(), spawnPos, destPos), LogLevel.NORMAL);
+    }
+	
+	protected void UpdateDebugLines()
+    {
+        m_aDebugShapes.Clear(); // Wipe old lines every frame/loop
+
+        foreach (Vehicle veh, vector dest : m_mVehicleDestinations)
+        {
+            if (!veh) continue;
+
+            vector points[2];
+            points[0] = veh.GetOrigin(); // Start is now dynamic current position
+            points[1] = dest;
+
+            m_aDebugShapes.Insert(Shape.CreateLines(Color.CYAN, ShapeFlags.NOZBUFFER | ShapeFlags.TRANSP, points, 2));
+        }
     }
 
     // Helper to ensure AI is ready before receiving orders
@@ -343,9 +377,8 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	    RoadNetworkManager roadMgr = aiWorld.GetRoadNetworkManager();
 	    
 	    vector reachablePos;
-	    float radius = 20.0; // Your completion radius
+	    float radius = 20.0;
 	
-	    // Clue #1: Use the vanilla 'Reachable' check
 	    if (!roadMgr.GetReachableWaypointInRoad(group.GetOrigin(), destPos, radius, reachablePos))
 	        reachablePos = destPos;
 	
@@ -357,12 +390,61 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	    
 	    if (wp)
 	    {
-	        // Clue #2: Dynamic radius calculation
-	        // The radius should be the original radius minus the offset we shifted the waypoint
 	        float distShift = vector.Distance(reachablePos, destPos);
 	        wp.SetCompletionRadius(Math.Max(5.0, radius - distShift));
-	        
 	        group.AddWaypoint(wp);
+			
+			#ifdef WORKBENCH
+			// We use a Line (easier to see sometimes) or a Cylinder for the destination
+			vector points[2];
+			points[0] = group.GetOrigin();
+			points[1] = reachablePos;
+			
+			// Use NOZBUFFER so it shows through the ground
+			// Use ShapeFlags.VISIBLE to ensure it's rendered
+			Shape debugLine = Shape.CreateLines(Color.RED, ShapeFlags.NOZBUFFER | ShapeFlags.TRANSP, points, 2);
+			
+			// Store it. IMPORTANT: If this array is cleared anywhere else, the arrow disappears immediately.
+			m_aDebugShapes.Insert(debugLine); 
+			
+			// Optional: Print to console to confirm the code actually reached this line
+			Print("DEBUG: Spawned shape at " + reachablePos.ToString(), LogLevel.NORMAL);
+			#endif
+	
+	        // --- NEW: DEBUG & GAME MASTER LOGIC ---
+	        MY_MissionHeader header = MY_MissionHeader.Cast(GetGame().GetMissionHeader());
+	        
+	        // 1. Map Debug Markers (Visual lines/icons on map)
+	        if (header && header.m_bShowDebugMarkers)
+	        {
+	            // This adds a temporary line on the map from start to finish
+	            SCR_MapEntity mapEnt = SCR_MapEntity.GetMapInstance();
+	            if (mapEnt)
+	            {
+	                // Note: Real-time map drawing usually requires a MapDescriptorComponent 
+	                // on the waypoint prefab itself for permanent visibility.
+	                Print(string.Format("[TRAFFIC DEBUG] Path: %1 -> %2", group.GetOrigin(), reachablePos), LogLevel.NORMAL);
+	            }
+	        }
+	
+	        // 1. Game Master Visibility
+	        SCR_EditableEntityComponent editable = SCR_EditableEntityComponent.Cast(wpEnt.FindComponent(SCR_EditableEntityComponent));
+	        if (editable)
+	        {
+	            // According to your source, SetParentEntity(null) triggers Register() 
+	            // and places it in the root of the Editor hierarchy.
+	            editable.SetParentEntity(null);
+	        }
+			
+			SCR_EditableEntityComponent groupEditable = SCR_EditableEntityComponent.Cast(group.FindComponent(SCR_EditableEntityComponent));
+			SCR_EditableEntityComponent wpEditable = SCR_EditableEntityComponent.Cast(wpEnt.FindComponent(SCR_EditableEntityComponent));
+			
+			if (groupEditable && wpEditable)
+			{
+			    // This makes the Waypoint a 'child' of the AI Group in the GM hierarchy.
+			    // Zeus will now see the line connecting the group to this waypoint.
+			    wpEditable.SetParentEntity(groupEditable);
+			}
 	    }
 	}
 
@@ -372,37 +454,56 @@ class SCR_AmbientTrafficManager : ScriptComponent
     protected void CleanupTraffic()
     {
         array<int> indicesToDelete = {};
+        array<int> playerIds = {};
+        GetGame().GetPlayerManager().GetPlayers(playerIds);
 
         for (int i = 0; i < m_aActiveVehicles.Count(); i++)
         {
             Vehicle veh = m_aActiveVehicles[i];
+            if (!veh) { indicesToDelete.Insert(i); continue; }
 
-            // Condition 1: Null (Deleted by engine)
-            if (!veh) 
+            // Condition: Destroyed
+            DamageManagerComponent damage = DamageManagerComponent.Cast(veh.FindComponent(DamageManagerComponent));
+            if (damage && damage.GetState() == EDamageState.DESTROYED)
             {
-                indicesToDelete.Insert(i);
-                continue;
-            }
-
-            // Condition 2: Destroyed
-            DamageManagerComponent damageMgr = DamageManagerComponent.Cast(veh.FindComponent(DamageManagerComponent));
-            if (damageMgr && damageMgr.GetState() == EDamageState.DESTROYED)
-            {
+                m_mVehicleDestinations.Remove(veh);
                 SCR_EntityHelper.DeleteEntityAndChildren(veh);
                 indicesToDelete.Insert(i);
                 continue;
             }
-            
-            // Condition 3: Distance Check
-            // (Simple check implemented here for demonstration)
-            // If you want to check distance to players, you'd need to iterate PlayerManager.
+
+            // Condition: Proximity & Distance Check
+            vector vehPos = veh.GetOrigin();
+            bool isPlayerNearby = false;
+
+            foreach (int playerId : playerIds)
+            {
+                IEntity player = GetGame().GetPlayerManager().GetPlayerControlledEntity(playerId);
+                if (!player) continue;
+
+                if (vector.Distance(vehPos, player.GetOrigin()) < m_fPlayerSafeRadius)
+                {
+                    isPlayerNearby = true;
+                    break;
+                }
+            }
+
+            // Despawn ONLY if no players are nearby AND it's far from its "spawn/manager" center
+            // (Or check distance to all players; if far from EVERYONE, despawn)
+            if (!isPlayerNearby)
+            {
+                float distToManager = vector.Distance(vehPos, GetOwner().GetOrigin());
+                if (distToManager > m_fDespawnDistance)
+                {
+                    m_mVehicleDestinations.Remove(veh);
+                    SCR_EntityHelper.DeleteEntityAndChildren(veh);
+                    indicesToDelete.Insert(i);
+                }
+            }
         }
 
-        // Remove from array backwards to keep indices valid
         for (int i = indicesToDelete.Count() - 1; i >= 0; i--)
-        {
             m_aActiveVehicles.Remove(indicesToDelete[i]);
-        }
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -410,23 +511,23 @@ class SCR_AmbientTrafficManager : ScriptComponent
     // ------------------------------------------------------------------------------------------------
     protected bool FindValidRoadPoints(out vector spawn, out vector dest)
     {
-        // Reduce attempts to 5 to prevent freezing
-        for(int i = 0; i < 5; i++)
+        for(int i = 0; i < 15; i++) // Increased attempts for long distance
         {
-            vector searchPos = GetRandomMapPos();
-            // Reduce radius to 50m (approx 100x100m box)
-            BaseRoad r1 = GetNearestRoad(searchPos, 50); 
-            
+            vector sPos = GetRandomMapPos();
+            BaseRoad r1 = GetNearestRoad(sPos, 500); 
             if (!r1) continue;
 
             array<vector> p1 = {};
             r1.GetPoints(p1);
-            if (p1.IsEmpty()) continue;
-            
             spawn = p1[0];
             
-            // Find destination
-            BaseRoad r2 = GetNearestRoad(GetRandomMapPos(), 50);
+            vector dPos = GetRandomMapPos();
+            
+            // Check Requirement: Distance at least 2000m
+            if (vector.Distance(spawn, dPos) < 2000) 
+                continue;
+
+            BaseRoad r2 = GetNearestRoad(dPos, 500);
             if (r2)
             {
                 array<vector> p2 = {};
