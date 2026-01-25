@@ -1,26 +1,45 @@
-[ComponentEditorProps(category: "Traffic System", description: "Mission Header with Traffic Control")]
-class MY_MissionHeader : SCR_MissionHeader
+// --- Nested Group: Spawn Settings ---
+[BaseContainerProps()]
+class GRAD_TRAFFIC_TrafficSpawnSettings
 {
-    [Attribute("1", desc: "Should traffic spawn at all?")]
+    [Attribute("1", desc: "Global toggle for the traffic system.")]
     bool m_bEnableTraffic;
 
+    [Attribute("CIV", desc: "Faction key (e.g. CIV, US).")]
+    string m_sTargetFaction;
+
+    [Attribute("1", desc: "Pull vehicles from the Faction Catalog?")]
+    bool m_bUseCatalog;
+}
+
+// --- Nested Group: Performance & Limits ---
+[BaseContainerProps()]
+class GRAD_TRAFFIC_TrafficLimitSettings
+{
     [Attribute("10", desc: "Max vehicles on map.")]
     int m_iMaxTrafficCount;
 
-    [Attribute("2000", desc: "Despawn range (meters).")]
+    [Attribute("2000", desc: "Outer despawn range.")]
     float m_fTrafficSpawnRange;
 
-    [Attribute("CIV", desc: "Faction key to pull from Catalog (e.g. CIV, US, USSR).")]
-    string m_sTargetFaction;
-
-    [Attribute("1", desc: "If true, pulls all vehicles from the target faction's catalog.")]
-    bool m_bUseCatalog;
-	
-	[Attribute("1", desc: "Show debug path markers on the map?")]
-	bool m_bShowDebugMarkers;
-	
-	[Attribute(desc: "Safe zone around players where despawn cannot happen", defvalue: "400")]
+    [Attribute("400", desc: "Safe zone radius around players.")]
     float m_fPlayerSafeRadius;
+}
+
+// --- The Main Header ---
+[ComponentEditorProps(category: "Traffic System", description: "Mission Header with Traffic Control")]
+class GRAD_TRAFFIC_MissionHeader : SCR_MissionHeader
+{
+    // Headline Variable (Top level category)
+    [Attribute("0", desc: "Display lines and markers for debugging?", category: "TRAFFIC SYSTEM: MASTER CONTROL")]
+    bool m_bShowDebugMarkers;
+
+    // Nested ACE-style categories
+    [Attribute()]
+    ref GRAD_TRAFFIC_TrafficSpawnSettings m_SpawnSettings;
+
+    [Attribute()]
+    ref GRAD_TRAFFIC_TrafficLimitSettings m_LimitSettings;
 }
 
 [ComponentEditorProps(category: "Traffic System", description: "Attach this to your GameMode entity.")]
@@ -69,25 +88,26 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	{
 	    if (!Replication.IsServer()) return;
 	
-	    MY_MissionHeader header = MY_MissionHeader.Cast(GetGame().GetMissionHeader());
 	    
 	    // Fallback defaults
 	    string factionToUse = "CIV";
 	    bool shouldEnable = true;
 	
-	    if (header)
-	    {
-	        shouldEnable = header.m_bEnableTraffic;
-	        m_iMaxVehicles = header.m_iMaxTrafficCount;
-	        m_fDespawnDistance = header.m_fTrafficSpawnRange;
-	        factionToUse = header.m_sTargetFaction;
-			m_fPlayerSafeRadius = header.m_fPlayerSafeRadius;
+	    GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
+	    if (!header || !header.m_SpawnSettings || !header.m_LimitSettings) return;
 	
-	        if (header.m_bUseCatalog)
-	        {
-	            m_aVehicleOptions.Clear();
-	            GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
-	        }
+	    // Accessing via the new nested paths
+	    shouldEnable    = header.m_SpawnSettings.m_bEnableTraffic;
+	    m_iMaxVehicles       = header.m_LimitSettings.m_iMaxTrafficCount;
+	    m_fDespawnDistance   = header.m_LimitSettings.m_fTrafficSpawnRange;
+	    m_fPlayerSafeRadius  = header.m_LimitSettings.m_fPlayerSafeRadius;
+	    
+	    factionToUse  = header.m_SpawnSettings.m_sTargetFaction;
+	
+	    if (header.m_SpawnSettings.m_bUseCatalog)
+	    {
+	        m_aVehicleOptions.Clear();
+	        GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
 	    }
 	
 	    if (!shouldEnable)
@@ -412,7 +432,7 @@ class SCR_AmbientTrafficManager : ScriptComponent
 			#endif
 	
 	        // --- NEW: DEBUG & GAME MASTER LOGIC ---
-	        MY_MissionHeader header = MY_MissionHeader.Cast(GetGame().GetMissionHeader());
+	        GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
 	        
 	        // 1. Map Debug Markers (Visual lines/icons on map)
 	        if (header && header.m_bShowDebugMarkers)
