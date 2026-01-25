@@ -11,33 +11,39 @@ class SCR_CivilianTrafficObserver : ScriptComponent
 	//------------------------------------------------------------------------------------------------
 	override void OnPostInit(IEntity owner)
 	{
-		if (!Replication.IsServer()) return;
-
-		// 1. Setup Damage Listener
-		m_pDamageManager = SCR_CharacterDamageManagerComponent.Cast(owner.FindComponent(SCR_CharacterDamageManagerComponent));
-		if (m_pDamageManager)
-			m_pDamageManager.GetOnDamageStateChanged().Insert(OnDamageStateChanged);
-
-		// 2. Hook into the Threat System
-		// We drill down: Character -> CombatComp -> AIAgent -> UtilityComp -> ThreatSystem
-		SCR_AICombatComponent combatComp = SCR_AICombatComponent.Cast(owner.FindComponent(SCR_AICombatComponent));
-		if (combatComp)
-		{
-			SCR_ChimeraAIAgent agent = combatComp.GetAiAgent();
-			if (agent)
-			{
-				SCR_AIUtilityComponent utility = SCR_AIUtilityComponent.Cast(agent.FindComponent(SCR_AIUtilityComponent));
-				if (utility)
-				{
-					m_ThreatSystem = utility.m_ThreatSystem;
-					if (m_ThreatSystem)
-					{
-						// This is the "Hook" - No loop required!
-						m_ThreatSystem.GetOnThreatStateChanged().Insert(OnThreatStateChanged);
-					}
-				}
-			}
-		}
+	    if (!Replication.IsServer()) return;
+	
+	    // Damage manager is usually internal to the prefab and safe to hook immediately
+	    m_pDamageManager = SCR_CharacterDamageManagerComponent.Cast(owner.FindComponent(SCR_CharacterDamageManagerComponent));
+	    if (m_pDamageManager)
+	        m_pDamageManager.GetOnDamageStateChanged().Insert(OnDamageStateChanged);
+	
+	    // Delay the threat system hook by a few frames to let the AI "Brain" connect to the "Body"
+	    GetGame().GetCallqueue().CallLater(TryHookThreatSystem, 1000, false, owner);
+	}
+	
+	// Separate the logic so we can call it after a delay
+	protected void TryHookThreatSystem(IEntity owner)
+	{
+	    SCR_AICombatComponent combatComp = SCR_AICombatComponent.Cast(owner.FindComponent(SCR_AICombatComponent));
+	    if (!combatComp) return;
+	
+	    SCR_ChimeraAIAgent agent = combatComp.GetAiAgent();
+	    if (!agent)
+	    {
+	        // If it's still null, try one more time in 2 seconds
+	        Print("[TRAFFIC DEBUG] AI Agent not found yet, retrying...", LogLevel.WARNING);
+	        GetGame().GetCallqueue().CallLater(TryHookThreatSystem, 2000, false, owner);
+	        return;
+	    }
+	
+	    SCR_AIUtilityComponent utility = SCR_AIUtilityComponent.Cast(agent.FindComponent(SCR_AIUtilityComponent));
+	    if (utility && utility.m_ThreatSystem)
+	    {
+	        m_ThreatSystem = utility.m_ThreatSystem;
+	        m_ThreatSystem.GetOnThreatStateChanged().Insert(OnThreatStateChanged);
+	        Print("[TRAFFIC DEBUG] Threat System Hooked Successfully!", LogLevel.NORMAL);
+	    }
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -45,13 +51,25 @@ class SCR_CivilianTrafficObserver : ScriptComponent
 	void OnThreatStateChanged(EAIThreatState prevState, EAIThreatState newState)
 	{
 		if (m_bPanicked || m_bKilled) return;
+		
+		IEntity owner = GetOwner();
 
 		// Trigger panic when AI reaches the THREATENED state (Threshold > 0.66)
+		if (newState == EAIThreatState.ALERTED && 
+		prevState != EAIThreatState.THREATENED && 
+		prevState != EAIThreatState.VIGILANT) {
+			SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
+			Print(string.Format("[TRAFFIC DEBUG] Gunfight Event Fired. State: %1", typename.EnumToString(EAIThreatState, newState)), LogLevel.NORMAL);
+		}
+		if (newState == EAIThreatState.VIGILANT && 
+		prevState != EAIThreatState.THREATENED) {
+			SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
+			Print(string.Format("[TRAFFIC DEBUG] Gunfight Event Fired. State: %1", typename.EnumToString(EAIThreatState, newState)), LogLevel.NORMAL);
+		}
 		if (newState == EAIThreatState.THREATENED)
 		{
 			m_bPanicked = true;
 			
-			IEntity owner = GetOwner();
 			SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
 			
 			Print(string.Format("[TRAFFIC DEBUG] Panic Event Fired. State: %1", typename.EnumToString(EAIThreatState, newState)), LogLevel.NORMAL);
