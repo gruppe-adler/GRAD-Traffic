@@ -1,6 +1,14 @@
 # GRAD Traffic
 
-Simplistic Civilian Traffic System for Reforger
+Simplistic Civilian Traffic System for Reforger.
+
+Spawns civilian cars, drives them somewhere, despawns them. Raises some events for threat level changes:
+
+`SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");` and 
+`SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "killed");`
+
+handing over the position of the event to any script.
+
 
 ## Sample Mission Header Config
 ```
