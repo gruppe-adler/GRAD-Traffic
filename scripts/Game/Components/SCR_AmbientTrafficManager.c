@@ -1,3 +1,22 @@
+[ComponentEditorProps(category: "Traffic System", description: "Mission Header with Traffic Control")]
+class MY_MissionHeader : SCR_MissionHeader
+{
+    [Attribute("1", desc: "Should traffic spawn at all?")]
+    bool m_bEnableTraffic;
+
+    [Attribute("10", desc: "Max vehicles on map.")]
+    int m_iMaxTrafficCount;
+
+    [Attribute("2000", desc: "Despawn range (meters).")]
+    float m_fTrafficSpawnRange;
+
+    [Attribute("CIV", desc: "Faction key to pull from Catalog (e.g. CIV, US, USSR).")]
+    string m_sTargetFaction;
+
+    [Attribute("1", desc: "If true, pulls all vehicles from the target faction's catalog.")]
+    bool m_bUseCatalog;
+}
+
 [ComponentEditorProps(category: "Traffic System", description: "Attach this to your GameMode entity.")]
 class SCR_AmbientTrafficManagerClass : ScriptComponentClass
 {
@@ -38,19 +57,85 @@ class SCR_AmbientTrafficManager : ScriptComponent
     // 1. Initialization
     // ------------------------------------------------------------------------------------------------
     override void OnPostInit(IEntity owner)
-    {
-        if (!Replication.IsServer()) return;
-
-        // Check for AI World
-        if (!GetGame().GetAIWorld())
-        {
-            Print("[TRAFFIC ERROR] No SCR_AIWorld found! Traffic cannot navigate.", LogLevel.ERROR);
-            return;
-        }
-
-        Print("[TRAFFIC] System Initialized. Waiting 5s to start loop...", LogLevel.NORMAL);
-        GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
-    }
+	{
+	    if (!Replication.IsServer()) return;
+	
+	    MY_MissionHeader header = MY_MissionHeader.Cast(GetGame().GetMissionHeader());
+	    
+	    // Fallback defaults
+	    string factionToUse = "CIV";
+	    bool shouldEnable = true;
+	
+	    if (header)
+	    {
+	        shouldEnable = header.m_bEnableTraffic;
+	        m_iMaxVehicles = header.m_iMaxTrafficCount;
+	        m_fDespawnDistance = header.m_fTrafficSpawnRange;
+	        factionToUse = header.m_sTargetFaction;
+	
+	        if (header.m_bUseCatalog)
+	        {
+	            m_aVehicleOptions.Clear();
+	            GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
+	        }
+	    }
+	
+	    if (!shouldEnable)
+	    {
+	        Print("[TRAFFIC] Disabled via Mission Header.", LogLevel.NORMAL);
+	        return; 
+	    }
+	
+	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2", m_aVehicleOptions.Count(), factionToUse));
+	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 5000, true);
+	}
+		
+	protected void GetVehiclesFromCatalog(string targetFactionKey, out array<ResourceName> outPrefabs)
+	{
+	    BaseGameMode gameMode = GetGame().GetGameMode();
+	    if (!gameMode) return;
+	
+	    SCR_EntityCatalogManagerComponent catalogManager = SCR_EntityCatalogManagerComponent.Cast(gameMode.FindComponent(SCR_EntityCatalogManagerComponent));
+	    if (!catalogManager) return;
+	
+	    // Get the vehicle catalog
+	    SCR_EntityCatalog catalog = catalogManager.GetEntityCatalogOfType(EEntityCatalogType.VEHICLE);
+	    if (!catalog) return;
+	
+	    array<SCR_EntityCatalogEntry> entries;
+		catalog.GetEntityList(entries);
+	    if (!entries) return;
+	
+	    foreach (SCR_EntityCatalogEntry entry : entries)
+	    {
+	        ResourceName prefab = entry.GetPrefab();
+	        if (prefab == "") continue;
+	
+	        // --- THE ERROR-PROOF CHECK ---
+	        // Instead of SCR_EntityCatalogFactionData, we look at the Prefab Data directly
+	        Resource resource = Resource.Load(prefab);
+	        if (!resource || !resource.IsValid()) continue;
+	
+	        IEntitySource source = resource.GetResource().ToEntitySource();
+	        
+	        // Find the FactionAffiliationComponent in the prefab's components
+	        for (int i = 0; i < source.GetComponentCount(); i++)
+	        {
+	            IEntityComponentSource compSource = source.GetComponent(i);
+	            if (compSource.GetClassName().Contains("FactionAffiliationComponent"))
+	            {
+	                string prefabFaction;
+	                compSource.Get("m_sFactionKey", prefabFaction);
+	                
+	                if (prefabFaction == targetFactionKey)
+	                {
+	                    outPrefabs.Insert(prefab);
+	                    break; 
+	                }
+	            }
+	        }
+	    }
+	}
 
     // ------------------------------------------------------------------------------------------------
     // 2. The Main Loop
