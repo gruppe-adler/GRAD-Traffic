@@ -8,6 +8,52 @@ This document outlines the design for an improved civilian behavior system using
 2. **Varied panic/gunfight reactions**
 3. **State-based behavior management**
 4. **Improved flee logic with road awareness**
+5. **Decoupled architecture - works on any map without configuration**
+
+---
+
+## Quick Start (No Configuration Required)
+
+GRAD-Traffic now works **out of the box** on any map with roads:
+
+### Option 1: Standalone Spawner (Recommended for Mod Maps)
+
+```
+1. Create an empty entity anywhere in your mission
+2. Add SCR_StandaloneTrafficSpawner component
+3. Done - traffic will spawn automatically
+```
+
+**Features:**
+- Auto-detects road network from SCR_AIWorld
+- Auto-loads vehicles from entity catalog OR uses built-in defaults
+- No GameMode dependency
+- No mission header required
+- Full behavior tree support
+
+### Option 2: Original Manager (GameMode Integration)
+
+```
+1. Add SCR_AmbientTrafficManager to your GameMode entity
+2. Optionally configure vehicle prefabs
+3. Optionally add GRAD_TRAFFIC_MissionHeader for fine-tuning
+```
+
+**Features:**
+- Integrates with existing GameMode
+- Mission header configuration (optional)
+- Falls back to defaults when no config found
+
+### Component Comparison
+
+| Feature | StandaloneTrafficSpawner | AmbientTrafficManager |
+|---------|--------------------------|----------------------|
+| GameMode required | No | No (optional) |
+| Mission Header | Not supported | Optional |
+| Entity Catalog | Auto-detect | Auto-detect |
+| Default Vehicles | Built-in fallbacks | Built-in fallbacks |
+| Behavior Tree | Always enabled | Configurable |
+| Attach to | Any entity | Any entity |
 
 ---
 

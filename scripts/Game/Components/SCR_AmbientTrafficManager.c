@@ -48,7 +48,7 @@ class GRAD_TRAFFIC_MissionHeader : SCR_MissionHeader
     ref GRAD_TRAFFIC_BehaviorSettings m_BehaviorSettings;
 }
 
-[ComponentEditorProps(category: "Traffic System", description: "Attach this to your GameMode entity.")]
+[ComponentEditorProps(category: "Traffic System", description: "Ambient traffic manager - works standalone or with Mission Header. Attach to GameMode or any persistent entity.")]
 class SCR_AmbientTrafficManagerClass : ScriptComponentClass
 {
 }
@@ -104,44 +104,94 @@ class SCR_AmbientTrafficManager : ScriptComponent
     override void OnPostInit(IEntity owner)
 	{
 	    if (!Replication.IsServer()) return;
-	
-	    
-	    // Fallback defaults
+
+	    // Sensible defaults that work without mission header
 	    string factionToUse = "CIV";
 	    bool shouldEnable = true;
-	
+	    bool useCatalog = true;
+	    bool hasMissionHeader = false;
+
+	    // Try to load from mission header (optional)
 	    GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
-	    if (!header || !header.m_SpawnSettings || !header.m_LimitSettings) return;
-	
-	    // Accessing via the new nested paths
-	    shouldEnable    = header.m_SpawnSettings.m_bEnableTraffic;
-	    m_iMaxVehicles       = header.m_LimitSettings.m_iMaxTrafficCount;
-	    m_fDespawnDistance   = header.m_LimitSettings.m_fTrafficSpawnRange;
-	    m_fPlayerSafeRadius  = header.m_LimitSettings.m_fPlayerSafeRadius;
-	    
-	    factionToUse  = header.m_SpawnSettings.m_sTargetFaction;
-	
-	    if (header.m_SpawnSettings.m_bUseCatalog)
+	    if (header && header.m_SpawnSettings && header.m_LimitSettings)
 	    {
-	        m_aVehicleOptions.Clear();
-	        GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
+	        hasMissionHeader = true;
+
+	        // Override defaults with mission header values
+	        shouldEnable = header.m_SpawnSettings.m_bEnableTraffic;
+	        factionToUse = header.m_SpawnSettings.m_sTargetFaction;
+	        useCatalog = header.m_SpawnSettings.m_bUseCatalog;
+	        m_bUseBehaviorTree = header.m_SpawnSettings.m_bUseBehaviorTree;
+
+	        m_iMaxVehicles = header.m_LimitSettings.m_iMaxTrafficCount;
+	        m_fDespawnDistance = header.m_LimitSettings.m_fTrafficSpawnRange;
+	        m_fPlayerSafeRadius = header.m_LimitSettings.m_fPlayerSafeRadius;
+
+	        Print("[TRAFFIC] Loaded configuration from Mission Header", LogLevel.NORMAL);
 	    }
-	
+	    else
+	    {
+	        Print("[TRAFFIC] No Mission Header found - using component defaults", LogLevel.NORMAL);
+	        // Component attribute defaults are already set, just ensure we have some vehicles
+	    }
+
 	    if (!shouldEnable)
 	    {
-	        Print("[TRAFFIC] Disabled via Mission Header.", LogLevel.NORMAL);
+	        Print("[TRAFFIC] Disabled via configuration.", LogLevel.NORMAL);
 	        return;
 	    }
 
-	    // Configure behavior tree usage
-	    m_bUseBehaviorTree = header.m_SpawnSettings.m_bUseBehaviorTree;
+	    // Try to populate vehicle list from catalog if enabled and list is empty
+	    if (useCatalog && (m_aVehicleOptions.IsEmpty() || m_aVehicleOptions.Count() == 0))
+	    {
+	        if (!m_aVehicleOptions)
+	            m_aVehicleOptions = {};
+
+	        GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
+	    }
+
+	    // Fallback: Try default vehicle prefabs if still empty
+	    if (m_aVehicleOptions.IsEmpty())
+	    {
+	        Print("[TRAFFIC] No vehicles from catalog, trying default prefabs...", LogLevel.WARNING);
+	        TryLoadDefaultVehicles();
+	    }
+
+	    // Final check - can't run without vehicles
+	    if (m_aVehicleOptions.IsEmpty())
+	    {
+	        Print("[TRAFFIC] ERROR: No vehicle prefabs available! Configure m_aVehicleOptions or ensure entity catalog has CIV vehicles.", LogLevel.ERROR);
+	        return;
+	    }
 
 	    // Subscribe to abandoned vehicle events
 	    SCR_TrafficEvents.OnVehicleAbandoned.Insert(OnVehicleAbandoned);
 
-	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2 (BehaviorTree: %3)",
-	        m_aVehicleOptions.Count(), factionToUse, m_bUseBehaviorTree));
+	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2 (BehaviorTree: %3, MissionHeader: %4)",
+	        m_aVehicleOptions.Count(), factionToUse, m_bUseBehaviorTree, hasMissionHeader));
 	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
+	}
+
+	// Try to load common civilian vehicles as fallback
+	protected void TryLoadDefaultVehicles()
+	{
+	    // Common vanilla civilian vehicle paths
+	    array<string> defaultPrefabs = {
+	        "{2A8A8B72369B5765}Prefabs/Vehicles/Wheeled/S1203/S1203_transport_CIV.et",
+	        "{E7C4D8176E09E19B}Prefabs/Vehicles/Wheeled/UAZ469/UAZ469_CIV.et",
+	        "{CF76689A2E364B92}Prefabs/Vehicles/Wheeled/M998/M1025_unarmed_CIVWL.et",
+	        "{3C3B0D4F0B4D5F85}Prefabs/Vehicles/Wheeled/Ural4320/Ural4320_transport_CIV.et"
+	    };
+
+	    foreach (string prefabPath : defaultPrefabs)
+	    {
+	        Resource res = Resource.Load(prefabPath);
+	        if (res && res.IsValid())
+	        {
+	            m_aVehicleOptions.Insert(prefabPath);
+	            Print(string.Format("[TRAFFIC] Loaded default vehicle: %1", prefabPath), LogLevel.NORMAL);
+	        }
+	    }
 	}
 		
 	protected void GetVehiclesFromCatalog(string targetFactionKey, out array<ResourceName> outPrefabs)
