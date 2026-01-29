@@ -1,3 +1,16 @@
+// ============================================================================
+// Legacy Civilian Traffic Observer
+// ============================================================================
+// This is the original observer component for backward compatibility.
+// For enhanced behavior with stuck detection and varied panic reactions,
+// use SCR_CivilianBehaviorTree instead (enabled via m_bUseBehaviorTree).
+//
+// This component provides:
+// - Basic threat monitoring
+// - Simple flee behavior (500m backward)
+// - Death event firing
+// ============================================================================
+
 [ComponentEditorProps(category: "Traffic System")]
 class SCR_CivilianTrafficObserverClass : ScriptComponentClass {}
 

@@ -10,6 +10,9 @@ class GRAD_TRAFFIC_TrafficSpawnSettings
 
     [Attribute("1", desc: "Pull vehicles from the Faction Catalog?")]
     bool m_bUseCatalog;
+
+    [Attribute("1", desc: "Use advanced behavior tree for civilians (enables stuck recovery and varied panic)")]
+    bool m_bUseBehaviorTree;
 }
 
 // --- Nested Group: Performance & Limits ---
@@ -40,6 +43,9 @@ class GRAD_TRAFFIC_MissionHeader : SCR_MissionHeader
 
     [Attribute()]
     ref GRAD_TRAFFIC_TrafficLimitSettings m_LimitSettings;
+
+    [Attribute()]
+    ref GRAD_TRAFFIC_BehaviorSettings m_BehaviorSettings;
 }
 
 [ComponentEditorProps(category: "Traffic System", description: "Attach this to your GameMode entity.")]
@@ -49,8 +55,17 @@ class SCR_AmbientTrafficManagerClass : ScriptComponentClass
 
 class SCR_TrafficEvents
 {
-    // Global hook: (Position, "gunfight" or "killed")
+    // Global hook: (Position, "gunfight" or "killed" or "alerted")
     static ref ScriptInvoker<vector, string> OnCivilianEvent = new ScriptInvoker<vector, string>();
+
+    // Behavior state change events
+    static ref ScriptInvoker<Vehicle, ECivilianBehaviorState> OnBehaviorStateChanged = new ScriptInvoker<Vehicle, ECivilianBehaviorState>();
+
+    // Recovery attempt events (Vehicle, attempt number)
+    static ref ScriptInvoker<Vehicle, int> OnRecoveryAttempt = new ScriptInvoker<Vehicle, int>();
+
+    // Vehicle abandoned (max recovery attempts reached)
+    static ref ScriptInvoker<Vehicle> OnVehicleAbandoned = new ScriptInvoker<Vehicle>();
 }
 
 class SCR_AmbientTrafficManager : ScriptComponent
@@ -79,7 +94,9 @@ class SCR_AmbientTrafficManager : ScriptComponent
     protected ref array<Vehicle> m_aActiveVehicles = {};
     protected ref map<Vehicle, vector> m_mVehicleDestinations = new map<Vehicle, vector>(); // Track dest for dynamic lines
     protected ref array<ref Shape> m_aDebugShapes = {};
+    protected ref array<Vehicle> m_aAbandonedVehicles = {}; // Vehicles marked for cleanup
 	protected float m_fPlayerSafeRadius = 400.0;
+    protected bool m_bUseBehaviorTree = true;
 
     // ------------------------------------------------------------------------------------------------
     // 1. Initialization
@@ -113,10 +130,17 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	    if (!shouldEnable)
 	    {
 	        Print("[TRAFFIC] Disabled via Mission Header.", LogLevel.NORMAL);
-	        return; 
+	        return;
 	    }
-	
-	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2", m_aVehicleOptions.Count(), factionToUse));
+
+	    // Configure behavior tree usage
+	    m_bUseBehaviorTree = header.m_SpawnSettings.m_bUseBehaviorTree;
+
+	    // Subscribe to abandoned vehicle events
+	    SCR_TrafficEvents.OnVehicleAbandoned.Insert(OnVehicleAbandoned);
+
+	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2 (BehaviorTree: %3)",
+	        m_aVehicleOptions.Count(), factionToUse, m_bUseBehaviorTree));
 	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
 	}
 		
@@ -487,6 +511,18 @@ class SCR_AmbientTrafficManager : ScriptComponent
             if (damage && damage.GetState() == EDamageState.DESTROYED)
             {
                 m_mVehicleDestinations.Remove(veh);
+                m_aAbandonedVehicles.RemoveItem(veh);
+                SCR_EntityHelper.DeleteEntityAndChildren(veh);
+                indicesToDelete.Insert(i);
+                continue;
+            }
+
+            // Condition: Abandoned (stuck recovery failed)
+            if (m_aAbandonedVehicles.Contains(veh))
+            {
+                Print(string.Format("[TRAFFIC] Cleaning up abandoned vehicle %1", veh), LogLevel.NORMAL);
+                m_mVehicleDestinations.Remove(veh);
+                m_aAbandonedVehicles.RemoveItem(veh);
                 SCR_EntityHelper.DeleteEntityAndChildren(veh);
                 indicesToDelete.Insert(i);
                 continue;
@@ -516,6 +552,7 @@ class SCR_AmbientTrafficManager : ScriptComponent
                 if (distToManager > m_fDespawnDistance)
                 {
                     m_mVehicleDestinations.Remove(veh);
+                    m_aAbandonedVehicles.RemoveItem(veh);
                     SCR_EntityHelper.DeleteEntityAndChildren(veh);
                     indicesToDelete.Insert(i);
                 }
@@ -606,8 +643,17 @@ class SCR_AmbientTrafficManager : ScriptComponent
     protected void OnDriverPanic(IEntity owner)
 	{
 	    Print("[TRAFFIC EVENT] PANIC! Driver reacting.", LogLevel.WARNING);
-	    // CHANGE THIS LINE:
 	    SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
+	}
+
+	// Called when a vehicle's behavior tree marks it for respawn after failed recovery
+	protected void OnVehicleAbandoned(Vehicle vehicle)
+	{
+	    if (!vehicle) return;
+	    if (m_aAbandonedVehicles.Contains(vehicle)) return;
+
+	    Print(string.Format("[TRAFFIC] Vehicle %1 marked as abandoned - will be cleaned up", vehicle), LogLevel.WARNING);
+	    m_aAbandonedVehicles.Insert(vehicle);
 	}
 	
     protected vector GetRandomMapPos()
