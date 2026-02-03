@@ -97,40 +97,57 @@ class SCR_AmbientTrafficManager
 	{
 	    if (!Replication.IsServer()) return;
 	
-	    
-	    // Fallback defaults
+	    // Default settings (used if no mission header found)
 	    string factionToUse = "CIV";
 	    bool shouldEnable = true;
+	    bool useCatalog = false;
+	    
+	    // The class already has these defaults from member variables:
+	    // m_iMaxVehicles = 10;
+	    // m_fDespawnDistance = 2000;
+	    // m_fPlayerSafeRadius = 400.0;
+	    // m_aVehicleOptions already contains the default S1203 prefab
 	
+	    // Try to load settings from mission header (optional)
 	    GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
 	    if (header && header.m_SpawnSettings && header.m_LimitSettings)
 	    {
-	        // Accessing via the new nested paths
-	        shouldEnable    = header.m_SpawnSettings.m_bEnableTraffic;
+	        Print("[TRAFFIC] Loading settings from mission header", LogLevel.NORMAL);
+	        
+	        shouldEnable         = header.m_SpawnSettings.m_bEnableTraffic;
 	        m_iMaxVehicles       = header.m_LimitSettings.m_iMaxTrafficCount;
 	        m_fDespawnDistance   = header.m_LimitSettings.m_fTrafficSpawnRange;
 	        m_fPlayerSafeRadius  = header.m_LimitSettings.m_fPlayerSafeRadius;
-	        
-	        factionToUse  = header.m_SpawnSettings.m_sTargetFaction;
-	
-	        if (header.m_SpawnSettings.m_bUseCatalog)
-	        {
-	            m_aVehicleOptions.Clear();
-	            GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
-	        }
+	        factionToUse         = header.m_SpawnSettings.m_sTargetFaction;
+	        useCatalog           = header.m_SpawnSettings.m_bUseCatalog;
 	
 	        if (!shouldEnable)
 	        {
-	            Print("[TRAFFIC] Disabled via Mission Header.", LogLevel.NORMAL);
+	            Print("[TRAFFIC] System disabled via Mission Header.", LogLevel.NORMAL);
 	            return; 
 	        }
 	    }
 	    else
 	    {
-	        Print("[TRAFFIC] No GRAD_TRAFFIC_MissionHeader found, using component defaults", LogLevel.WARNING);
+	        Print("[TRAFFIC] No mission header found - using built-in defaults", LogLevel.NORMAL);
+	    }
+	    
+	    // Optionally load vehicles from catalog
+	    if (useCatalog)
+	    {
+	        m_aVehicleOptions.Clear();
+	        GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
+	        
+	        if (m_aVehicleOptions.IsEmpty())
+	        {
+	            Print("[TRAFFIC] Catalog returned no vehicles, reverting to hardcoded default", LogLevel.WARNING);
+	            m_aVehicleOptions.Insert("{750A8D1695BD6998}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_randomized.et");
+	        }
 	    }
 	
-	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2", m_aVehicleOptions.Count(), factionToUse));
+	    Print(string.Format("[TRAFFIC] Initialized! %1 vehicle types | Faction: %2 | Max vehicles: %3", 
+	        m_aVehicleOptions.Count(), factionToUse, m_iMaxVehicles), LogLevel.NORMAL);
+	        
 	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
 	}
 		
