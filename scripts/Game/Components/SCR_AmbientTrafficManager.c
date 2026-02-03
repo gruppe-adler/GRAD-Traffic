@@ -94,26 +94,31 @@ class SCR_AmbientTrafficManager : ScriptComponent
 	    bool shouldEnable = true;
 	
 	    GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
-	    if (!header || !header.m_SpawnSettings || !header.m_LimitSettings) return;
-	
-	    // Accessing via the new nested paths
-	    shouldEnable    = header.m_SpawnSettings.m_bEnableTraffic;
-	    m_iMaxVehicles       = header.m_LimitSettings.m_iMaxTrafficCount;
-	    m_fDespawnDistance   = header.m_LimitSettings.m_fTrafficSpawnRange;
-	    m_fPlayerSafeRadius  = header.m_LimitSettings.m_fPlayerSafeRadius;
-	    
-	    factionToUse  = header.m_SpawnSettings.m_sTargetFaction;
-	
-	    if (header.m_SpawnSettings.m_bUseCatalog)
+	    if (header && header.m_SpawnSettings && header.m_LimitSettings)
 	    {
-	        m_aVehicleOptions.Clear();
-	        GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
+	        // Accessing via the new nested paths
+	        shouldEnable    = header.m_SpawnSettings.m_bEnableTraffic;
+	        m_iMaxVehicles       = header.m_LimitSettings.m_iMaxTrafficCount;
+	        m_fDespawnDistance   = header.m_LimitSettings.m_fTrafficSpawnRange;
+	        m_fPlayerSafeRadius  = header.m_LimitSettings.m_fPlayerSafeRadius;
+	        
+	        factionToUse  = header.m_SpawnSettings.m_sTargetFaction;
+	
+	        if (header.m_SpawnSettings.m_bUseCatalog)
+	        {
+	            m_aVehicleOptions.Clear();
+	            GetVehiclesFromCatalog(factionToUse, m_aVehicleOptions);
+	        }
+	
+	        if (!shouldEnable)
+	        {
+	            Print("[TRAFFIC] Disabled via Mission Header.", LogLevel.NORMAL);
+	            return; 
+	        }
 	    }
-	
-	    if (!shouldEnable)
+	    else
 	    {
-	        Print("[TRAFFIC] Disabled via Mission Header.", LogLevel.NORMAL);
-	        return; 
+	        Print("[TRAFFIC] No GRAD_TRAFFIC_MissionHeader found, using component defaults", LogLevel.WARNING);
 	    }
 	
 	    Print(string.Format("[TRAFFIC] Initialized with %1 vehicles for faction %2", m_aVehicleOptions.Count(), factionToUse));
@@ -304,7 +309,6 @@ class SCR_AmbientTrafficManager : ScriptComponent
         // We pass the Group ID to the callqueue so we can verify it still exists later
         GetGame().GetCallqueue().CallLater(DelayedWaypointAssign, 2000, false, group, destPos);
 
-        m_aActiveVehicles.Insert(vehicle);
         Print(string.Format("[TRAFFIC] Spawned %1 at %2 (Heading to %3)", vehicle.GetName(), spawnPos, destPos), LogLevel.NORMAL);
     }
 	
