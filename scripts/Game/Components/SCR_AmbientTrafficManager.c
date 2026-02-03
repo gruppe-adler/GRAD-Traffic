@@ -42,49 +42,58 @@ class GRAD_TRAFFIC_MissionHeader : SCR_MissionHeader
     ref GRAD_TRAFFIC_TrafficLimitSettings m_LimitSettings;
 }
 
-[ComponentEditorProps(category: "Traffic System", description: "Attach this to your GameMode entity.")]
-class SCR_AmbientTrafficManagerClass : ScriptComponentClass
-{
-}
-
 class SCR_TrafficEvents
 {
     // Global hook: (Position, "gunfight" or "killed")
     static ref ScriptInvoker<vector, string> OnCivilianEvent = new ScriptInvoker<vector, string>();
 }
 
-class SCR_AmbientTrafficManager : ScriptComponent
+class SCR_AmbientTrafficManager
 {
-    // --- Attributes ---
-    [Attribute("10", desc: "Max active vehicles allowed")]
-    protected int m_iMaxVehicles;
-
-    [Attribute("2000", desc: "Despawn Distance (Meters)")] 
-    protected float m_fDespawnDistance;
-
-    // PREFABS
-    [Attribute(desc: "List of vehicle prefabs to spawn randomly", UIWidgets.ResourceNamePicker)]
-    protected ref array<ResourceName> m_aVehicleOptions;
-
-    [Attribute("{22E43956740A6794}Prefabs/Characters/Factions/CIV/GenericCivilians/Character_CIV_Randomized.et", params: "et")]
-    protected ResourceName m_DriverPrefab;
-
-    [Attribute("{750A8D1695BD6998}Prefabs/AI/Waypoints/AIWaypoint_Move.et", params: "et")]
-    protected ResourceName m_WaypointPrefab;
-
-    [Attribute(desc: "Select a Group Prefab (e.g. Group_Base.et or similar)", params: "et")]
-	protected ResourceName m_GroupPrefab;
+    protected static ref SCR_AmbientTrafficManager s_Instance;
+    
+    // --- Configuration ---
+    protected int m_iMaxVehicles = 10;
+    protected float m_fDespawnDistance = 2000;
+    protected float m_fPlayerSafeRadius = 400.0;
+    
+    // PREFABS - Default values that work out of the box
+    protected ref array<ResourceName> m_aVehicleOptions = {
+        "{750A8D1695BD6998}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_randomized.et"
+    };
+    
+    protected ResourceName m_DriverPrefab = "{22E43956740A6794}Prefabs/Characters/Factions/CIV/GenericCivilians/Character_CIV_Randomized.et";
+    protected ResourceName m_WaypointPrefab = "{750A8D1695BD6998}Prefabs/AI/Waypoints/AIWaypoint_Move.et";
+    protected ResourceName m_GroupPrefab = "{000CD338713F2B5A}Prefabs/Groups/Group_Base.et";
 
     // Tracking
     protected ref array<Vehicle> m_aActiveVehicles = {};
-    protected ref map<Vehicle, vector> m_mVehicleDestinations = new map<Vehicle, vector>(); // Track dest for dynamic lines
+    protected ref map<Vehicle, vector> m_mVehicleDestinations = new map<Vehicle, vector>();
     protected ref array<ref Shape> m_aDebugShapes = {};
-	protected float m_fPlayerSafeRadius = 400.0;
+
+    // ------------------------------------------------------------------------------------------------
+    // Singleton & Auto-Init
+    // ------------------------------------------------------------------------------------------------
+    static SCR_AmbientTrafficManager GetInstance()
+    {
+        if (!s_Instance)
+            s_Instance = new SCR_AmbientTrafficManager();
+        return s_Instance;
+    }
+    
+    void SCR_AmbientTrafficManager()
+    {
+        // Auto-hook into game start
+        if (GetGame())
+        {
+            GetGame().GetCallqueue().CallLater(Initialize, 1000, false);
+        }
+    }
 
     // ------------------------------------------------------------------------------------------------
     // 1. Initialization
     // ------------------------------------------------------------------------------------------------
-    override void OnPostInit(IEntity owner)
+    protected void Initialize()
 	{
 	    if (!Replication.IsServer()) return;
 	
@@ -512,12 +521,22 @@ class SCR_AmbientTrafficManager : ScriptComponent
                 }
             }
 
-            // Despawn ONLY if no players are nearby AND it's far from its "spawn/manager" center
-            // (Or check distance to all players; if far from EVERYONE, despawn)
+            // Despawn if no players are nearby AND it's far from ALL players
             if (!isPlayerNearby)
             {
-                float distToManager = vector.Distance(vehPos, GetOwner().GetOrigin());
-                if (distToManager > m_fDespawnDistance)
+                // Check minimum distance to any player
+                float minPlayerDist = float.MAX;
+                foreach (int pId : playerIds)
+                {
+                    IEntity player = GetGame().GetPlayerManager().GetPlayerControlledEntity(pId);
+                    if (player)
+                    {
+                        float dist = vector.Distance(vehPos, player.GetOrigin());
+                        if (dist < minPlayerDist) minPlayerDist = dist;
+                    }
+                }
+                
+                if (minPlayerDist > m_fDespawnDistance)
                 {
                     m_mVehicleDestinations.Remove(veh);
                     SCR_EntityHelper.DeleteEntityAndChildren(veh);
@@ -620,4 +639,30 @@ class SCR_AmbientTrafficManager : ScriptComponent
         GetGame().GetWorldEntity().GetWorldBounds(mapMin, mapMax);
         return Vector(Math.RandomFloat(mapMin[0], mapMax[0]), 0, Math.RandomFloat(mapMin[2], mapMax[2]));
     }	
+}
+
+// ------------------------------------------------------------------------------------------------
+// Auto-Start Hook
+// ------------------------------------------------------------------------------------------------
+modded class SCR_PlayerController
+{
+    protected bool m_bTrafficInitialized = false;
+    
+    override void OnControlledEntityChanged(IEntity from, IEntity to)
+    {
+        super.OnControlledEntityChanged(from, to);
+        
+        // Initialize traffic when first player spawns (only once, only on server)
+        if (!m_bTrafficInitialized && Replication.IsServer() && to)
+        {
+            m_bTrafficInitialized = true;
+            GetGame().GetCallqueue().CallLater(InitTraffic, 2000, false);
+        }
+    }
+    
+    protected void InitTraffic()
+    {
+        SCR_AmbientTrafficManager.GetInstance();
+        Print("[TRAFFIC] Auto-initialized via player controller", LogLevel.NORMAL);
+    }
 }
