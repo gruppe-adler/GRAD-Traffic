@@ -418,8 +418,8 @@ class SCR_AmbientTrafficManager
 	        // Force engine start
 	        carController.StartEngine();
 	        
-	        // Force handbrake off (Critical!)
-	        carController.SetPersistentHandBrake(false);
+	        // Force handbrake off - uncommented as probable cause for civs driving backwards all the time
+	        // carController.SetPersistentHandBrake(false);
 	        
 	        // Optional: Force into first gear/drive if needed, though automatic usually handles this
 	        Print(string.Format("[TRAFFIC] Hotwired vehicle %1", vehicle), LogLevel.NORMAL);
