@@ -59,7 +59,12 @@ class SCR_AmbientTrafficManager
     
     // PREFABS - Default values that work out of the box
     protected ref array<ResourceName> m_aVehicleOptions = {
-        "{750A8D1695BD6998}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_randomized.et"
+        "{D2BCF98E80CF634C}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_beige.et",
+        "{6AF3A89263D26CD8}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_blue.et",
+        "{2A66E3B8B0C61D87}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_brown.et",
+        "{6E485048122CEEEE}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_red.et",
+        "{E5F73B9D4CEB94E4}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_white.et",
+        "{E3AD3E9E60F2E061}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_yellow.et"
     };
     
     protected ResourceName m_DriverPrefab = "{22E43956740A6794}Prefabs/Characters/Factions/CIV/GenericCivilians/Character_CIV_Randomized.et";
@@ -141,7 +146,7 @@ class SCR_AmbientTrafficManager
 	        if (m_aVehicleOptions.IsEmpty())
 	        {
 	            Print("[TRAFFIC] Catalog returned no vehicles, reverting to hardcoded default", LogLevel.WARNING);
-	            m_aVehicleOptions.Insert("{750A8D1695BD6998}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_randomized.et");
+            m_aVehicleOptions.Insert("{D2BCF98E80CF634C}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_beige.et");
 	        }
 	    }
 	
