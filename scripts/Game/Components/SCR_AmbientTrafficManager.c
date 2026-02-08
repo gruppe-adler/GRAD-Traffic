@@ -46,6 +46,10 @@ class SCR_TrafficEvents
 {
     // Global hook: (Position, "gunfight" or "killed")
     static ref ScriptInvoker<vector, string> OnCivilianEvent = new ScriptInvoker<vector, string>();
+
+    // fired when a traffic vehicle spawns or despawns
+    static ref ScriptInvoker<Vehicle> OnTrafficVehicleSpawned = new ScriptInvoker<Vehicle>();
+    static ref ScriptInvoker<Vehicle> OnTrafficVehicleDespawned = new ScriptInvoker<Vehicle>();
 }
 
 class SCR_AmbientTrafficManager
@@ -340,6 +344,8 @@ class SCR_AmbientTrafficManager
         // We pass the Group ID to the callqueue so we can verify it still exists later
         GetGame().GetCallqueue().CallLater(DelayedWaypointAssign, 2000, false, group, destPos);
 
+        SCR_TrafficEvents.OnTrafficVehicleSpawned.Invoke(vehicle);
+
         Print(string.Format("[TRAFFIC] Spawned %1 at %2 (Heading to %3)", vehicle.GetName(), spawnPos, destPos), LogLevel.NORMAL);
     }
 	
@@ -563,6 +569,7 @@ class SCR_AmbientTrafficManager
                     m_mVehicleDestinations.Remove(veh);
                     SCR_EntityHelper.DeleteEntityAndChildren(veh);
                     indicesToDelete.Insert(i);
+                    SCR_TrafficEvents.OnTrafficVehicleDespawned.Invoke(veh);
                 }
             }
         }
