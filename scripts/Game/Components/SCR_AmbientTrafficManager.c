@@ -55,6 +55,7 @@ class SCR_TrafficEvents
 class SCR_AmbientTrafficManager
 {
     protected static ref SCR_AmbientTrafficManager s_Instance;
+    protected bool m_bIsInitialized = false;
     
     // --- Configuration ---
     protected int m_iMaxVehicles = 10;
@@ -90,21 +91,33 @@ class SCR_AmbientTrafficManager
         return s_Instance;
     }
     
+    static void ResetInstance()
+    {
+        if (s_Instance)
+        {
+            s_Instance.Shutdown();
+            s_Instance = null;
+        }
+    }
+    
     void SCR_AmbientTrafficManager()
     {
-        // Auto-hook into game start
-        if (GetGame())
-        {
-            GetGame().GetCallqueue().CallLater(Initialize, 1000, false);
-        }
+        // Constructor is now empty - initialization happens explicitly via Initialize()
     }
 
     // ------------------------------------------------------------------------------------------------
     // 1. Initialization
     // ------------------------------------------------------------------------------------------------
-    protected void Initialize()
+    void Initialize()
 	{
 	    if (!Replication.IsServer()) return;
+	    if (m_bIsInitialized)
+	    {
+	        Print("[TRAFFIC] Already initialized, skipping.", LogLevel.WARNING);
+	        return;
+	    }
+	    
+	    m_bIsInitialized = true;
 	
 	    // Default settings (used if no mission header found)
 	    string factionToUse = "CIV";
@@ -158,6 +171,29 @@ class SCR_AmbientTrafficManager
 	        m_aVehicleOptions.Count(), factionToUse, m_iMaxVehicles), LogLevel.NORMAL);
 	        
 	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
+	}
+	
+	// ------------------------------------------------------------------------------------------------
+	// Cleanup & Shutdown
+	// ------------------------------------------------------------------------------------------------
+	void Shutdown()
+	{
+	    Print("[TRAFFIC] Shutting down...", LogLevel.NORMAL);
+	    
+	    // Stop the update loop
+	    GetGame().GetCallqueue().Remove(UpdateTrafficLoop);
+	    
+	    // Clean up all active vehicles
+	    foreach (Vehicle veh : m_aActiveVehicles)
+	    {
+	        if (veh)
+	            SCR_EntityHelper.DeleteEntityAndChildren(veh);
+	    }
+	    
+	    m_aActiveVehicles.Clear();
+	    m_mVehicleDestinations.Clear();
+	    m_aDebugShapes.Clear();
+	    m_bIsInitialized = false;
 	}
 		
 	protected void GetVehiclesFromCatalog(string targetFactionKey, out array<ResourceName> outPrefabs)
@@ -697,23 +733,37 @@ class SCR_AmbientTrafficManager
 // ------------------------------------------------------------------------------------------------
 modded class SCR_PlayerController
 {
-    protected bool m_bTrafficInitialized = false;
-    
     override void OnControlledEntityChanged(IEntity from, IEntity to)
     {
         super.OnControlledEntityChanged(from, to);
         
         // Initialize traffic when first player spawns (only once, only on server)
-        if (!m_bTrafficInitialized && Replication.IsServer() && to)
+        if (Replication.IsServer() && to)
         {
-            m_bTrafficInitialized = true;
             GetGame().GetCallqueue().CallLater(InitTraffic, 2000, false);
         }
     }
     
     protected void InitTraffic()
     {
-        SCR_AmbientTrafficManager.GetInstance();
+        SCR_AmbientTrafficManager mgr = SCR_AmbientTrafficManager.GetInstance();
+        mgr.Initialize();
         Print("[TRAFFIC] Auto-initialized via player controller", LogLevel.NORMAL);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Cleanup on Game End
+// ------------------------------------------------------------------------------------------------
+modded class SCR_BaseGameMode
+{
+    override void OnGameEnd()
+    {
+        super.OnGameEnd();
+        
+        if (Replication.IsServer())
+        {
+            SCR_AmbientTrafficManager.ResetInstance();
+        }
     }
 }
