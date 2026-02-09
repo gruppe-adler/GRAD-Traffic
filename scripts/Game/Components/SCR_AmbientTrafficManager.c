@@ -218,9 +218,12 @@ class SCR_AmbientTrafficManager
         if (m_aActiveVehicles.Count() < m_iMaxVehicles)
             SpawnSingleTrafficUnit();
 
+		/*
+		// debug to see paths of civs
         #ifdef WORKBENCH
         UpdateDebugLines();
         #endif
+		*/
     }
 
     protected void SpawnSingleTrafficUnit()
@@ -472,6 +475,7 @@ class SCR_AmbientTrafficManager
 	        wp.SetCompletionRadius(Math.Max(5.0, radius - distShift));
 	        group.AddWaypoint(wp);
 			
+			/*
 			#ifdef WORKBENCH
 			// We use a Line (easier to see sometimes) or a Cylinder for the destination
 			vector points[2];
@@ -488,6 +492,7 @@ class SCR_AmbientTrafficManager
 			// Optional: Print to console to confirm the code actually reached this line
 			Print("DEBUG: Spawned shape at " + reachablePos.ToString(), LogLevel.NORMAL);
 			#endif
+			*/
 	
 	        // --- NEW: DEBUG & GAME MASTER LOGIC ---
 	        GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
