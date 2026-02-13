@@ -694,10 +694,13 @@ class SCR_AmbientTrafficManager
         m_mVehicleDestinations.Remove(veh);
         m_mLastLOSCheck.Remove(veh);
 
+        // Capture identifying info before deletion
+        string vehDesc = string.Format("%1", veh);
+
         // Delete the entity
         SCR_EntityHelper.DeleteEntityAndChildren(veh);
 
-        Print(string.Format("[TRAFFIC] Cleaned up vehicle %1", veh), LogLevel.DEBUG);
+        Print(string.Format("[TRAFFIC] Cleaned up vehicle %1", vehDesc), LogLevel.DEBUG);
     }
 
     protected vector GetRandomMapPos()
