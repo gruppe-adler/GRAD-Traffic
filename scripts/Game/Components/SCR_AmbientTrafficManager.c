@@ -280,9 +280,6 @@ class SCR_AmbientTrafficManager
              return;
         }
 		
-		m_aActiveVehicles.Insert(vehicle);
-        m_mVehicleDestinations.Insert(vehicle, destPos);
-        
         // 3. Spawn Driver
         IEntity drvEnt = GetGame().SpawnEntityPrefab(Resource.Load(m_DriverPrefab), GetGame().GetWorld(), params);
         if (!drvEnt)
@@ -349,6 +346,10 @@ class SCR_AmbientTrafficManager
         // 6. Assign Waypoint
         // We pass the Group ID to the callqueue so we can verify it still exists later
         GetGame().GetCallqueue().CallLater(DelayedWaypointAssign, 2000, false, group, destPos);
+
+        // 7. Add to tracking structures only after all spawn steps succeed
+        m_aActiveVehicles.Insert(vehicle);
+        m_mVehicleDestinations.Insert(vehicle, destPos);
 
         Print(string.Format("[TRAFFIC] Spawned %1 at %2 (Heading to %3)", vehicle.GetName(), spawnPos, destPos), LogLevel.NORMAL);
     }
