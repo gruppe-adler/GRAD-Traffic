@@ -769,6 +769,11 @@ class SCR_AmbientTrafficManager
             toVehicle.Normalize();
 
             float dotProduct = vector.Dot(playerDir, toVehicle);
+            // Clamp to valid domain for Acos to avoid NaN due to floating point drift
+            if (dotProduct > 1.0)
+                dotProduct = 1.0;
+            else if (dotProduct < -1.0)
+                dotProduct = -1.0;
             float viewAngle = Math.Acos(dotProduct) * Math.RAD2DEG;
 
             // Only trace if within ~110 degree FOV (peripheral vision)
