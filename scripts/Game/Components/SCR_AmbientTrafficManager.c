@@ -247,6 +247,17 @@ class SCR_AmbientTrafficManager
 
         EntitySpawnParams params = new EntitySpawnParams();
         params.TransformMode = ETransformMode.WORLD;
+
+        // Derive spawn orientation from road direction (spawnPos -> destPos)
+        vector forward = vector.Direction(spawnPos, destPos);
+        // Fallback to a default forward direction if points are (almost) identical
+        if (forward.LengthSq() < 0.0001)
+            forward = "0 0 1";
+
+        vector up = "0 1 0";
+        // Build a transform matrix with the desired forward and up vectors
+        Math3D.DirectionAndUpMatrix(forward, up, params.Transform);
+        // Ensure the position is set to the chosen spawn position
         params.Transform[3] = spawnPos;
 
         // 1. Spawn Group
