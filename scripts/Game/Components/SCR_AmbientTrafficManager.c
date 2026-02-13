@@ -110,7 +110,7 @@ class SCR_AmbientTrafficManager
     // ------------------------------------------------------------------------------------------------
     protected void Initialize()
 	{
-	    if (!Replication.IsServer()) return;
+	    if (!Replication.IsServer() && !Replication.IsRunning()) return;
 	
 	    // Default settings (used if no mission header found)
 	    string factionToUse = "CIV";
@@ -293,6 +293,9 @@ class SCR_AmbientTrafficManager
 		
 		m_aActiveVehicles.Insert(vehicle);
         m_mVehicleDestinations.Insert(vehicle, destPos);
+
+		// Notify listeners (e.g. replay system) that a traffic vehicle was spawned
+		SCR_TrafficEvents.OnTrafficVehicleSpawned.Invoke(vehicle);
         
         // 3. Spawn Driver
         IEntity drvEnt = GetGame().SpawnEntityPrefab(Resource.Load(m_DriverPrefab), GetGame().GetWorld(), params);
@@ -693,6 +696,9 @@ class SCR_AmbientTrafficManager
         // Remove from all tracking structures
         m_mVehicleDestinations.Remove(veh);
         m_mLastLOSCheck.Remove(veh);
+
+        // Notify listeners (e.g. replay system) before deletion
+        SCR_TrafficEvents.OnTrafficVehicleDespawned.Invoke(veh);
 
         // Capture identifying info before deletion
         string vehDesc = string.Format("%1", veh);
