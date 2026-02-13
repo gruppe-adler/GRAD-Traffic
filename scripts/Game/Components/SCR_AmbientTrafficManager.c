@@ -46,6 +46,11 @@ class SCR_TrafficEvents
 {
     // Global hook: (Position, "gunfight" or "killed")
     static ref ScriptInvoker<vector, string> OnCivilianEvent = new ScriptInvoker<vector, string>();
+    
+    // Backwards-compatible hooks for traffic vehicle lifecycle events
+    // These invokers are kept to avoid breaking existing mods/systems that subscribe to them.
+    static ref ScriptInvoker<IEntity> OnTrafficVehicleSpawned = new ScriptInvoker<IEntity>();
+    static ref ScriptInvoker<IEntity> OnTrafficVehicleDespawned = new ScriptInvoker<IEntity>();
 }
 
 class SCR_AmbientTrafficManager
