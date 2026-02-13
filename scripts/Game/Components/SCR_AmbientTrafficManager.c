@@ -46,16 +46,11 @@ class SCR_TrafficEvents
 {
     // Global hook: (Position, "gunfight" or "killed")
     static ref ScriptInvoker<vector, string> OnCivilianEvent = new ScriptInvoker<vector, string>();
-
-    // fired when a traffic vehicle spawns or despawns
-    static ref ScriptInvoker<Vehicle> OnTrafficVehicleSpawned = new ScriptInvoker<Vehicle>();
-    static ref ScriptInvoker<Vehicle> OnTrafficVehicleDespawned = new ScriptInvoker<Vehicle>();
 }
 
 class SCR_AmbientTrafficManager
 {
     protected static ref SCR_AmbientTrafficManager s_Instance;
-    protected bool m_bIsInitialized = false;
     
     // --- Configuration ---
     protected int m_iMaxVehicles = 10;
@@ -81,6 +76,11 @@ class SCR_AmbientTrafficManager
     protected ref map<Vehicle, vector> m_mVehicleDestinations = new map<Vehicle, vector>();
     protected ref array<ref Shape> m_aDebugShapes = {};
 
+    // Line of Sight tracking for despawn prevention
+    protected ref map<Vehicle, float> m_mLastLOSCheck = new map<Vehicle, float>();
+    const float LOS_CHECK_INTERVAL = 3.0; // Check LOS every 3 seconds per vehicle
+    const float TRAFFIC_VISIBILITY_CHECK_HEIGHT = 1.5; // Eye level offset
+
     // ------------------------------------------------------------------------------------------------
     // Singleton & Auto-Init
     // ------------------------------------------------------------------------------------------------
@@ -91,33 +91,21 @@ class SCR_AmbientTrafficManager
         return s_Instance;
     }
     
-    static void ResetInstance()
-    {
-        if (s_Instance)
-        {
-            s_Instance.Shutdown();
-            s_Instance = null;
-        }
-    }
-    
     void SCR_AmbientTrafficManager()
     {
-        // Constructor is now empty - initialization happens explicitly via Initialize()
+        // Auto-hook into game start
+        if (GetGame())
+        {
+            GetGame().GetCallqueue().CallLater(Initialize, 1000, false);
+        }
     }
 
     // ------------------------------------------------------------------------------------------------
     // 1. Initialization
     // ------------------------------------------------------------------------------------------------
-    void Initialize()
+    protected void Initialize()
 	{
 	    if (!Replication.IsServer()) return;
-	    if (m_bIsInitialized)
-	    {
-	        Print("[TRAFFIC] Already initialized, skipping.", LogLevel.WARNING);
-	        return;
-	    }
-	    
-	    m_bIsInitialized = true;
 	
 	    // Default settings (used if no mission header found)
 	    string factionToUse = "CIV";
@@ -171,29 +159,6 @@ class SCR_AmbientTrafficManager
 	        m_aVehicleOptions.Count(), factionToUse, m_iMaxVehicles), LogLevel.NORMAL);
 	        
 	    GetGame().GetCallqueue().CallLater(UpdateTrafficLoop, 1000, true);
-	}
-	
-	// ------------------------------------------------------------------------------------------------
-	// Cleanup & Shutdown
-	// ------------------------------------------------------------------------------------------------
-	void Shutdown()
-	{
-	    Print("[TRAFFIC] Shutting down...", LogLevel.NORMAL);
-	    
-	    // Stop the update loop
-	    GetGame().GetCallqueue().Remove(UpdateTrafficLoop);
-	    
-	    // Clean up all active vehicles
-	    foreach (Vehicle veh : m_aActiveVehicles)
-	    {
-	        if (veh)
-	            SCR_EntityHelper.DeleteEntityAndChildren(veh);
-	    }
-	    
-	    m_aActiveVehicles.Clear();
-	    m_mVehicleDestinations.Clear();
-	    m_aDebugShapes.Clear();
-	    m_bIsInitialized = false;
 	}
 		
 	protected void GetVehiclesFromCatalog(string targetFactionKey, out array<ResourceName> outPrefabs)
@@ -254,155 +219,133 @@ class SCR_AmbientTrafficManager
         if (m_aActiveVehicles.Count() < m_iMaxVehicles)
             SpawnSingleTrafficUnit();
 
-		/*
-		// debug to see paths of civs
         #ifdef WORKBENCH
         UpdateDebugLines();
         #endif
-		*/
     }
 
     protected void SpawnSingleTrafficUnit()
     {
-        if (m_aVehicleOptions.IsEmpty()) return;
+	
+        if (m_aVehicleOptions.IsEmpty())
+        {
+            Print("[TRAFFIC ERROR] No vehicle prefabs in the list!", LogLevel.ERROR);
+            return;
+        }
         
         vector spawnPos, destPos;
-        
-        // 1. Find Road Points
-        if (!FindValidRoadPoints(spawnPos, destPos)) return;
-
-        // -----------------------------------------------------------------------
-        // CHECK 1: PLAYER DISTANCE (Prevent Instant Despawn)
-        // -----------------------------------------------------------------------
-        float closestPlayerDist = float.MAX;
-        array<int> playerIds = {};
-        GetGame().GetPlayerManager().GetPlayers(playerIds);
-        
-        // If no players, don't spawn
-        if (playerIds.IsEmpty()) return;
-
-        foreach (int pid : playerIds)
+        if (!FindValidRoadPoints(spawnPos, destPos)) 
         {
-            IEntity player = GetGame().GetPlayerManager().GetPlayerControlledEntity(pid);
-            if (!player) continue;
-            
-            float dist = vector.Distance(spawnPos, player.GetOrigin());
-            if (dist < closestPlayerDist)
-            {
-                closestPlayerDist = dist;
-            }
+             Print("[TRAFFIC DEBUG] Failed to find road points. Retrying next loop.", LogLevel.WARNING);
+             return;
         }
 
-        // If the closest player is further than the despawn range, abort.
-        if (closestPlayerDist > m_fDespawnDistance) return;
-
-        // -----------------------------------------------------------------------
-        // CHECK 2: TRAFFIC DENSITY (Prevent Clustering)
-        // -----------------------------------------------------------------------
-        foreach (Vehicle activeVeh : m_aActiveVehicles)
-        {
-            if (!activeVeh) continue;
-            
-            // Check if ANY existing traffic is within 200m of this new spawn point
-            if (vector.Distance(spawnPos, activeVeh.GetOrigin()) < 200.0)
-            {
-                // Too close! Abort this spawn attempt.
-                return;
-            }
-        }
-
-        // -----------------------------------------------------------------------
-        // CALCULATION: ROTATION (Prevent Reversing)
-        // -----------------------------------------------------------------------
         EntitySpawnParams params = new EntitySpawnParams();
         params.TransformMode = ETransformMode.WORLD;
+        params.Transform[3] = spawnPos;
 
-        // Create a vector pointing from Start to Finish
-        vector direction = vector.Direction(spawnPos, destPos);
-        
-        // Convert to angles
-        vector angles = direction.VectorToAngles();
-        
-        // Create matrix from angles
-        vector mat[4];
-        Math3D.AnglesToMatrix(angles, mat);
-        
-        // Apply position to matrix
-        mat[3] = spawnPos;
-        
-        // Assign to params
-        params.Transform = mat;
-
-        // -----------------------------------------------------------------------
-        // SPAWNING
-        // -----------------------------------------------------------------------
-
-        // 3. Spawn Group
+        // 1. Spawn Group
         IEntity groupEnt = GetGame().SpawnEntityPrefab(Resource.Load(m_GroupPrefab), GetGame().GetWorld(), params);
         SCR_AIGroup group = SCR_AIGroup.Cast(groupEnt);
-        if (!group) return;
-        
-        FactionManager factionMgr = GetGame().GetFactionManager();
-        if (factionMgr)
+        if (!group) 
         {
-            Faction civFaction = factionMgr.GetFactionByKey("CIV");
-            if (civFaction) group.SetFaction(civFaction);
+            Print("[TRAFFIC ERROR] Failed to spawn AIGroup!", LogLevel.ERROR);
+            return;
         }
+		
+		FactionManager factionMgr = GetGame().GetFactionManager();
+		if (factionMgr)
+		{
+		    // Civilians MUST have a faction to navigate road networks properly
+		    Faction civFaction = factionMgr.GetFactionByKey("CIV");
+		    if (civFaction)
+		        group.SetFaction(civFaction);
+		    else
+		        Print("[TRAFFIC ERROR] CIV Faction not found in FactionManager!", LogLevel.ERROR);
+		}
 
-        // 4. Spawn Vehicle (Inherits Rotation)
+        // 2. Spawn Vehicle
         ResourceName randomCarPath = m_aVehicleOptions.GetRandomElement();
         IEntity vehEnt = GetGame().SpawnEntityPrefab(Resource.Load(randomCarPath), GetGame().GetWorld(), params);
         Vehicle vehicle = Vehicle.Cast(vehEnt);
         if (!vehicle)
         {
+             Print("[TRAFFIC ERROR] Failed to spawn Vehicle entity!", LogLevel.ERROR);
              SCR_EntityHelper.DeleteEntityAndChildren(group);
              return;
         }
-        
-        m_aActiveVehicles.Insert(vehicle);
+		
+		m_aActiveVehicles.Insert(vehicle);
         m_mVehicleDestinations.Insert(vehicle, destPos);
         
-        // 5. Spawn Driver
+        // 3. Spawn Driver
         IEntity drvEnt = GetGame().SpawnEntityPrefab(Resource.Load(m_DriverPrefab), GetGame().GetWorld(), params);
         if (!drvEnt)
         {
+             Print("[TRAFFIC ERROR] Failed to spawn Driver entity!", LogLevel.ERROR);
              SCR_EntityHelper.DeleteEntityAndChildren(group);
              SCR_EntityHelper.DeleteEntityAndChildren(vehicle);
              return;
         }
+		
         
-        // 6. Setup AI
+        // 4. Link Agent to Group
         AIControlComponent aiControl = AIControlComponent.Cast(drvEnt.FindComponent(AIControlComponent));
         if (aiControl)
         {
             AIAgent agent = aiControl.GetControlAIAgent();
             if (agent)
             {
-                agent.PreventMaxLOD();
+    				agent.PreventMaxLOD(); // Keeps the brain active
                 group.AddAgent(agent);
+				
+                Print(string.Format("[TRAFFIC DEBUG] Agent %1 added to Group %2", agent, group), LogLevel.NORMAL);
+            }
+            else
+            {
+                Print("[TRAFFIC ERROR] Driver has AIControl but no AIAgent!", LogLevel.ERROR);
             }
         }
-        
-        SCR_AIGroupUtilityComponent utility = SCR_AIGroupUtilityComponent.Cast(group.FindComponent(SCR_AIGroupUtilityComponent));
-        if (utility) utility.SetCombatMode(EAIGroupCombatMode.HOLD_FIRE);
-
-        // 7. Move Driver In
-        MoveDriverInVehicle(vehicle, drvEnt);
-        
-        // Wake up brain
-        if (aiControl) 
+        else
         {
-            AIAgent agent = aiControl.GetControlAIAgent();
-            if (agent) { agent.DeactivateAI(); agent.ActivateAI(); }
+            Print("[TRAFFIC ERROR] Driver prefab missing AIControlComponent!", LogLevel.ERROR);
         }
-        
-        // 8. Start Engine
-        ForceVehicleStart(vehicle);
+		
+		SCR_AIGroupUtilityComponent utility = SCR_AIGroupUtilityComponent.Cast(group.FindComponent(SCR_AIGroupUtilityComponent));
+		if (utility)
+		{
+		    utility.SetCombatMode(EAIGroupCombatMode.HOLD_FIRE); // Civilians should be passive
+		}
 
-        // 9. Assign Waypoint
+        // 5. Seat Driver
+        if (MoveDriverInVehicle(vehicle, drvEnt))
+        {
+             Print("[TRAFFIC DEBUG] Driver seated in Pilot seat successfully.", LogLevel.NORMAL);
+        }
+        else
+        {
+             Print("[TRAFFIC ERROR] Failed to seat driver! Check CompartmentAccessComponent.", LogLevel.ERROR);
+        }
+		
+		// lets ai check its not walking but in a vehicle now
+		if (aiControl) {
+			
+			AIAgent agent = aiControl.GetControlAIAgent();
+		    if (agent)
+		    {
+		        // This is the most "violent" way to wake up an agent
+		        agent.DeactivateAI();
+		        agent.ActivateAI(); 
+		    }
+		}
+		
+		ForceVehicleStart(vehicle);
+
+        // 6. Assign Waypoint
+        // We pass the Group ID to the callqueue so we can verify it still exists later
         GetGame().GetCallqueue().CallLater(DelayedWaypointAssign, 2000, false, group, destPos);
 
-        SCR_TrafficEvents.OnTrafficVehicleSpawned.Invoke(vehicle);
+        Print(string.Format("[TRAFFIC] Spawned %1 at %2 (Heading to %3)", vehicle.GetName(), spawnPos, destPos), LogLevel.NORMAL);
     }
 	
 	protected void UpdateDebugLines()
@@ -480,8 +423,8 @@ class SCR_AmbientTrafficManager
 	        // Force engine start
 	        carController.StartEngine();
 	        
-	        // Force handbrake off - uncommented as probable cause for civs driving backwards all the time
-	        // carController.SetPersistentHandBrake(false);
+	        // Release handbrake so vehicle can drive normally
+	        carController.SetPersistentHandBrake(false);
 	        
 	        // Optional: Force into first gear/drive if needed, though automatic usually handles this
 	        Print(string.Format("[TRAFFIC] Hotwired vehicle %1", vehicle), LogLevel.NORMAL);
@@ -511,7 +454,6 @@ class SCR_AmbientTrafficManager
 	        wp.SetCompletionRadius(Math.Max(5.0, radius - distShift));
 	        group.AddWaypoint(wp);
 			
-			/*
 			#ifdef WORKBENCH
 			// We use a Line (easier to see sometimes) or a Cylinder for the destination
 			vector points[2];
@@ -528,7 +470,6 @@ class SCR_AmbientTrafficManager
 			// Optional: Print to console to confirm the code actually reached this line
 			Print("DEBUG: Spawned shape at " + reachablePos.ToString(), LogLevel.NORMAL);
 			#endif
-			*/
 	
 	        // --- NEW: DEBUG & GAME MASTER LOGIC ---
 	        GRAD_TRAFFIC_MissionHeader header = GRAD_TRAFFIC_MissionHeader.Cast(GetGame().GetMissionHeader());
@@ -585,8 +526,7 @@ class SCR_AmbientTrafficManager
             DamageManagerComponent damage = DamageManagerComponent.Cast(veh.FindComponent(DamageManagerComponent));
             if (damage && damage.GetState() == EDamageState.DESTROYED)
             {
-                m_mVehicleDestinations.Remove(veh);
-                SCR_EntityHelper.DeleteEntityAndChildren(veh);
+                CleanupVehicle(veh);
                 indicesToDelete.Insert(i);
                 continue;
             }
@@ -621,13 +561,22 @@ class SCR_AmbientTrafficManager
                         if (dist < minPlayerDist) minPlayerDist = dist;
                     }
                 }
-                
+
+                // Only despawn if:
+                // 1. Beyond despawn distance AND
+                // 2. Not visible to any player (LOS check)
                 if (minPlayerDist > m_fDespawnDistance)
                 {
-                    m_mVehicleDestinations.Remove(veh);
-                    SCR_EntityHelper.DeleteEntityAndChildren(veh);
+                    // Check line of sight before despawning
+                    if (IsVehicleVisibleToAnyPlayer(veh))
+                    {
+                        Print(string.Format("[TRAFFIC] Vehicle beyond despawn range but visible, keeping (distance: %.0fm)", minPlayerDist), LogLevel.DEBUG);
+                        continue; // Don't despawn if visible
+                    }
+
+                    CleanupVehicle(veh);
                     indicesToDelete.Insert(i);
-                    SCR_TrafficEvents.OnTrafficVehicleDespawned.Invoke(veh);
+                    Print(string.Format("[TRAFFIC] Despawned vehicle (distance: %.0fm, not visible)", minPlayerDist), LogLevel.DEBUG);
                 }
             }
         }
@@ -719,13 +668,106 @@ class SCR_AmbientTrafficManager
 	    // CHANGE THIS LINE:
 	    SCR_TrafficEvents.OnCivilianEvent.Invoke(owner.GetOrigin(), "gunfight");
 	}
-	
+
+    // Helper to properly cleanup a vehicle and its tracking data
+    protected void CleanupVehicle(Vehicle veh)
+    {
+        if (!veh) return;
+
+        // Remove from all tracking structures
+        m_mVehicleDestinations.Remove(veh);
+        m_mLastLOSCheck.Remove(veh);
+
+        // Delete the entity
+        SCR_EntityHelper.DeleteEntityAndChildren(veh);
+
+        Print(string.Format("[TRAFFIC] Cleaned up vehicle %1", veh), LogLevel.DEBUG);
+    }
+
     protected vector GetRandomMapPos()
     {
         vector mapMin, mapMax;
         GetGame().GetWorldEntity().GetWorldBounds(mapMin, mapMax);
         return Vector(Math.RandomFloat(mapMin[0], mapMax[0]), 0, Math.RandomFloat(mapMin[2], mapMax[2]));
-    }	
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // 5. Line of Sight Helpers
+    // ------------------------------------------------------------------------------------------------
+
+    // Performs a line of sight trace between two points
+    protected bool HasLineOfSight(vector from, vector to)
+    {
+        autoptr TraceParam trace = new TraceParam();
+        trace.Start = from;
+        trace.End = to;
+        trace.Flags = TraceFlags.WORLD | TraceFlags.ENTS; // Check world geometry and entities
+        trace.LayerMask = EPhysicsLayerPresets.Projectile; // Use projectile layer (blocks on terrain, buildings)
+
+        float hitDist = GetGame().GetWorld().TraceMove(trace, null);
+
+        // If hitDist is 1.0, trace reached destination without hitting anything
+        return hitDist >= 1.0;
+    }
+
+    // Checks if any player has line of sight to the vehicle
+    protected bool IsVehicleVisibleToAnyPlayer(Vehicle veh)
+    {
+        if (!veh) return false;
+
+        float currentTime = GetGame().GetWorld().GetWorldTime() / 1000.0; // Convert to seconds
+
+        // Check if we've checked this vehicle recently (optimization)
+        if (m_mLastLOSCheck.Contains(veh))
+        {
+            float lastCheck = m_mLastLOSCheck[veh];
+            if (currentTime - lastCheck < LOS_CHECK_INTERVAL)
+                return true; // Assume visible to be safe (don't despawn yet)
+        }
+
+        // Update check time
+        m_mLastLOSCheck.Set(veh, currentTime);
+
+        vector vehPos = veh.GetOrigin();
+        vehPos[1] = vehPos[1] + 2.0; // Check center of vehicle, slightly elevated
+
+        array<int> playerIds = {};
+        GetGame().GetPlayerManager().GetPlayers(playerIds);
+
+        foreach (int playerId : playerIds)
+        {
+            IEntity player = GetGame().GetPlayerManager().GetPlayerControlledEntity(playerId);
+            if (!player) continue;
+
+            vector playerEyePos = player.GetOrigin();
+            playerEyePos[1] = playerEyePos[1] + TRAFFIC_VISIBILITY_CHECK_HEIGHT;
+
+            // Quick distance check first (optimization)
+            float dist = vector.Distance(vehPos, playerEyePos);
+            if (dist > m_fDespawnDistance) continue; // Too far to matter
+
+            // Check if within view frustum (cheap check before raycast)
+            vector playerAngles = player.GetAngles();
+            vector playerDir = playerAngles.AnglesToVector();
+            vector toVehicle = vehPos - playerEyePos;
+            toVehicle.Normalize();
+
+            float dotProduct = vector.Dot(playerDir, toVehicle);
+            float viewAngle = Math.Acos(dotProduct) * Math.RAD2DEG;
+
+            // Only trace if within ~110 degree FOV (peripheral vision)
+            if (viewAngle > 110) continue;
+
+            // Perform line of sight trace
+            if (HasLineOfSight(playerEyePos, vehPos))
+            {
+                Print(string.Format("[TRAFFIC DEBUG] Vehicle visible to player %1", playerId), LogLevel.DEBUG);
+                return true; // Player can see this vehicle
+            }
+        }
+
+        return false; // No player has LOS
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -733,37 +775,23 @@ class SCR_AmbientTrafficManager
 // ------------------------------------------------------------------------------------------------
 modded class SCR_PlayerController
 {
+    protected bool m_bTrafficInitialized = false;
+    
     override void OnControlledEntityChanged(IEntity from, IEntity to)
     {
         super.OnControlledEntityChanged(from, to);
         
         // Initialize traffic when first player spawns (only once, only on server)
-        if (Replication.IsServer() && to)
+        if (!m_bTrafficInitialized && Replication.IsServer() && to)
         {
+            m_bTrafficInitialized = true;
             GetGame().GetCallqueue().CallLater(InitTraffic, 2000, false);
         }
     }
     
     protected void InitTraffic()
     {
-        SCR_AmbientTrafficManager mgr = SCR_AmbientTrafficManager.GetInstance();
-        mgr.Initialize();
+        SCR_AmbientTrafficManager.GetInstance();
         Print("[TRAFFIC] Auto-initialized via player controller", LogLevel.NORMAL);
-    }
-}
-
-// ------------------------------------------------------------------------------------------------
-// Cleanup on Game End
-// ------------------------------------------------------------------------------------------------
-modded class SCR_BaseGameMode
-{
-    override void OnGameEnd()
-    {
-        super.OnGameEnd();
-        
-        if (Replication.IsServer())
-        {
-            SCR_AmbientTrafficManager.ResetInstance();
-        }
     }
 }
