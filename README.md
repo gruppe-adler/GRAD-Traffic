@@ -95,6 +95,27 @@ protected ref array<ResourceName> m_aVehicleOptions = {
 
 ---
 
+## Scripting API
+
+### Controlling Vehicle Count at Runtime
+
+You can change the maximum number of traffic vehicles during a mission using the setter on the traffic manager singleton:
+
+```c
+// Stop all civilian traffic spawning
+SCR_AmbientTrafficManager.GetInstance().SetMaxVehicles(0);
+
+// Restore traffic to 10 vehicles
+SCR_AmbientTrafficManager.GetInstance().SetMaxVehicles(10);
+
+// Read current max vehicle count
+int currentMax = SCR_AmbientTrafficManager.GetInstance().GetMaxVehicles();
+```
+
+Setting the count to `0` will prevent new vehicles from spawning. Existing vehicles will continue to despawn naturally as they leave the traffic range.
+
+---
+
 ## WIP
 
 <img width="480" height="420" alt="thumbnail" src="https://github.com/user-attachments/assets/6d5e19f4-f426-48fb-93e2-58d8e65b73c3" />

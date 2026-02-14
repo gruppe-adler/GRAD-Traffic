@@ -96,7 +96,21 @@ class SCR_AmbientTrafficManager
             s_Instance = new SCR_AmbientTrafficManager();
         return s_Instance;
     }
-    
+
+    // ------------------------------------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------------------------------------
+    void SetMaxVehicles(int count)
+    {
+        m_iMaxVehicles = Math.Max(count, 0);
+        Print(string.Format("[TRAFFIC] Max vehicles set to %1", m_iMaxVehicles), LogLevel.NORMAL);
+    }
+
+    int GetMaxVehicles()
+    {
+        return m_iMaxVehicles;
+    }
+
     void SCR_AmbientTrafficManager()
     {
         // Auto-hook into game start
