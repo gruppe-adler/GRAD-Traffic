@@ -85,6 +85,7 @@ class SCR_AmbientTrafficManager
     protected ref map<Vehicle, float> m_mLastLOSCheck = new map<Vehicle, float>();
     const float LOS_CHECK_INTERVAL = 3.0; // Check LOS every 3 seconds per vehicle
     const float TRAFFIC_VISIBILITY_CHECK_HEIGHT = 1.5; // Eye level offset
+    const float MIN_VEHICLE_SPACING = 200.0; // Minimum distance between spawned vehicles
 
     // ------------------------------------------------------------------------------------------------
     // Singleton & Auto-Init
@@ -661,11 +662,26 @@ class SCR_AmbientTrafficManager
 	        if (tooCloseToPlayer || !withinRangeOfAnyPlayer)
 	            continue;
 	        
-	        // 3. Pick a random destination
+	        // 3. Check minimum distance to existing traffic vehicles (prevent blobbing)
+	        bool tooCloseToVehicle = false;
+	        foreach (Vehicle existingVeh : m_aActiveVehicles)
+	        {
+	            if (!existingVeh) continue;
+	            if (vector.Distance(spawn, existingVeh.GetOrigin()) < MIN_VEHICLE_SPACING)
+	            {
+	                tooCloseToVehicle = true;
+	                break;
+	            }
+	        }
+	        
+	        if (tooCloseToVehicle)
+	            continue;
+	        
+	        // 4. Pick a random destination
 	        vector dPos = GetRandomMapPos();
 	        if (vector.Distance(spawn, dPos) < 2000) continue;
 	
-	        // 4. THE REACHABILITY TEST
+	        // 5. THE REACHABILITY TEST
 	        // We ask the manager: "Find a spot on a road near dPos reachable from spawn"
 	        vector validDestPos;
 	        float searchRadius = 500.0; // How far from dPos we're willing to look for a road
