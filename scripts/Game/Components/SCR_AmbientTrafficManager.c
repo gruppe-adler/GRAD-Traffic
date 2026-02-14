@@ -615,6 +615,17 @@ class SCR_AmbientTrafficManager
 	    RoadNetworkManager roadMgr = aiWorld.GetRoadNetworkManager();
 	    if (!roadMgr) return false;
 	
+	    // Gather player positions once for all iterations
+	    array<int> playerIds = {};
+	    GetGame().GetPlayerManager().GetPlayers(playerIds);
+	    array<vector> playerPositions = {};
+	    foreach (int playerId : playerIds)
+	    {
+	        IEntity player = GetGame().GetPlayerManager().GetPlayerControlledEntity(playerId);
+	        if (player)
+	            playerPositions.Insert(player.GetOrigin());
+	    }
+	
 	    for(int i = 0; i < 15; i++) 
 	    {
 	        // 1. Pick a random start
@@ -627,11 +638,34 @@ class SCR_AmbientTrafficManager
 	        r1.GetPoints(p1);
 	        spawn = p1[0];
 	        
-	        // 2. Pick a random destination
+	        // 2. Check spawn position against player positions before continuing
+	        // Must be outside safe radius of ALL players (no visible pop-in)
+	        // Must be within despawn distance of at least ONE player (won't be immediately despawned)
+	        bool tooCloseToPlayer = false;
+	        bool withinRangeOfAnyPlayer = false;
+	        
+	        foreach (vector playerPos : playerPositions)
+	        {
+	            float distToPlayer = vector.Distance(spawn, playerPos);
+	            if (distToPlayer < m_fPlayerSafeRadius)
+	            {
+	                tooCloseToPlayer = true;
+	                break;
+	            }
+	            if (!withinRangeOfAnyPlayer && distToPlayer < m_fDespawnDistance)
+	            {
+	                withinRangeOfAnyPlayer = true;
+	            }
+	        }
+	        
+	        if (tooCloseToPlayer || !withinRangeOfAnyPlayer)
+	            continue;
+	        
+	        // 3. Pick a random destination
 	        vector dPos = GetRandomMapPos();
 	        if (vector.Distance(spawn, dPos) < 2000) continue;
 	
-	        // 3. THE REACHABILITY TEST
+	        // 4. THE REACHABILITY TEST
 	        // We ask the manager: "Find a spot on a road near dPos reachable from spawn"
 	        vector validDestPos;
 	        float searchRadius = 500.0; // How far from dPos we're willing to look for a road
