@@ -92,6 +92,24 @@ protected ref array<ResourceName> m_aVehicleOptions = {
 };
 ```
 
+### Method 3: Mission Header Vehicle List (Per‑mission)
+
+You can also provide a vehicle prefab list directly in the mission header. This allows server managers to override vehicle selection per mission without changing code or rebuilding. Example (see `Missions/Testworld.conf`):
+
+```properties
+m_SpawnSettings GRAD_TRAFFIC_TrafficSpawnSettings {
+ m_bEnableTraffic 1
+ m_sTargetFaction "CIV"
+ m_bUseCatalog 0
+ m_aVehicleOptions {
+  "{D2BCF98E80CF634C}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_beige.et",
+  "{6AF3A89263D26CD8}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_blue.et"
+ }
+}
+```
+
+When present, the mission header list takes precedence over both the catalog and the hardcoded defaults.
+
 
 ---
 

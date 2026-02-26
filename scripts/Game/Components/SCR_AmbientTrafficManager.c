@@ -11,6 +11,8 @@ class GRAD_TRAFFIC_TrafficSpawnSettings
     [Attribute("1", desc: "Pull vehicles from the Faction Catalog?")]
     bool m_bUseCatalog;
 }
+    [Attribute("", desc: "Optional: explicit list of vehicle prefabs to use (overrides catalog/hardcoded)")]
+    ref array<ResourceName> m_aVehicleOptions;
 
 // --- Nested Group: Performance & Limits ---
 [BaseContainerProps()]
@@ -142,11 +144,29 @@ class SCR_AmbientTrafficManager
 	            Print("[TRAFFIC] System disabled via Mission Header.", LogLevel.NORMAL);
 	            return; 
 	        }
-	    }
-	    else
-	    {
-	        Print("[TRAFFIC] No mission header found - using built-in defaults", LogLevel.NORMAL);
-	    }
+
+        // Validate limit settings from header
+        if (m_iMaxVehicles < 0)
+        {
+            Print(string.Format("[TRAFFIC] Invalid m_iMaxTrafficCount (%1) in header, resetting to 10", m_iMaxVehicles), LogLevel.WARNING);
+            m_iMaxVehicles = 10;
+        }
+        else if (m_iMaxVehicles > 200)
+        {
+            Print(string.Format("[TRAFFIC] m_iMaxTrafficCount too high (%1), clamping to 200", m_iMaxVehicles), LogLevel.WARNING);
+            m_iMaxVehicles = 200;
+        }
+
+        if (m_fTrafficSpawnRange < 0.0)
+        {
+            Print(string.Format("[TRAFFIC] Invalid m_fTrafficSpawnRange (%1), resetting to 2000", m_fTrafficSpawnRange), LogLevel.WARNING);
+            m_fTrafficSpawnRange = 2000.0;
+        }
+        if (m_fPlayerSafeRadius < 0.0)
+        {
+            Print(string.Format("[TRAFFIC] Invalid m_fPlayerSafeRadius (%1), resetting to 400", m_fPlayerSafeRadius), LogLevel.WARNING);
+            m_fPlayerSafeRadius = 400.0;
+        }
 	    
 	    // Optionally load vehicles from catalog
 	    if (useCatalog)
@@ -160,6 +180,36 @@ class SCR_AmbientTrafficManager
             m_aVehicleOptions.Insert("{D2BCF98E80CF634C}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_beige.et");
 	        }
 	    }
+
+        // Mission header can optionally provide an explicit vehicle list which overrides catalog/hardcoded
+        if (header && header.m_SpawnSettings && header.m_SpawnSettings.m_aVehicleOptions && header.m_SpawnSettings.m_aVehicleOptions.Count() > 0)
+        {
+            ref array<ResourceName> list = header.m_SpawnSettings.m_aVehicleOptions;
+            m_aVehicleOptions = new array<ResourceName>();
+            foreach (ResourceName refName : list)
+            {
+                if (!refName)
+                {
+                    Print("[TRAFFIC] Skipping empty vehicle entry in header list", LogLevel.WARNING);
+                    continue;
+                }
+                m_aVehicleOptions.Insert(refName);
+            }
+            if (m_aVehicleOptions.IsEmpty())
+            {
+                Print("[TRAFFIC] Header vehicle list contained no valid entries, reverting to defaults", LogLevel.WARNING);
+                // restore hardcoded defaults (could re-run catalog logic later if needed)
+                m_aVehicleOptions = {
+                    "{D2BCF98E80CF634C}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_beige.et",
+                    "{6AF3A89263D26CD8}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_blue.et",
+                    "{2A66E3B8B0C61D87}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_brown.et",
+                    "{6E485048122CEEEE}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_red.et",
+                    "{E5F73B9D4CEB94E4}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_white.et",
+                    "{E3AD3E9E60F2E061}Prefabs/Vehicles/Wheeled/S1203/S1203_cargo_yellow.et"
+                };
+            }
+            Print(string.Format("[TRAFFIC] Using %1 vehicle types from mission header list", m_aVehicleOptions.Count()), LogLevel.NORMAL);
+        }
 	
 	    Print(string.Format("[TRAFFIC] Initialized! %1 vehicle types | Faction: %2 | Max vehicles: %3", 
 	        m_aVehicleOptions.Count(), factionToUse, m_iMaxVehicles), LogLevel.NORMAL);
