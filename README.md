@@ -16,21 +16,21 @@ handing over the position of the event to any script.
 ### Sample Config
 ```json
 {
-  "GRAD_TRAFFIC_MissionHeader": {
-    "m_bShowDebugMarkers": true,
-    "m_SpawnSettings": {
-      "m_bEnableTraffic": true,
-      "m_sTargetFaction": "CIV",
-      "m_bUseCatalog": true
-    },
-    "m_LimitSettings": {
-      "m_iMaxTrafficCount": 15,
-      "m_fTrafficSpawnRange": 2500.0,
-      "m_fPlayerSafeRadius": 500.0
-    }
+  "m_bShowDebugMarkers": false,
+  "m_TrafficSpawnSettings": {
+    "m_bEnableTraffic": true,
+    "m_sTargetFaction": "CIV",
+    "m_bUseCatalog": true
+  },
+  "m_TrafficLimitSettings": {
+    "m_iMaxTrafficCount": 15,
+    "m_fTrafficSpawnRange": 2500.0,
+    "m_fPlayerSafeRadius": 500.0
   }
 }
 ```
+
+> All traffic fields sit at the **top level** of the mission header JSON — there is no wrapper object.
 
 ### Settings Explained
 
@@ -69,8 +69,7 @@ handing over the position of the event to any script.
 Set `m_bUseCatalog` to `true` in your mission header. The system will automatically find all vehicles assigned to the specified faction.
 
 **Requirements:**
-- Vehicles must have a `FactionAffiliationComponent` with matching `m_sFactionKey`
-- Vehicles must be registered in the Entity Catalog
+- Vehicles must be registered in the faction's Entity Catalog (the CIV faction catalog is populated by default in vanilla Reforger)
 
 **Pros:** Dynamic, no code changes needed  
 **Cons:** Less control over specific vehicle selection
