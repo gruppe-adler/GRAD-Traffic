@@ -369,6 +369,53 @@ class SCR_AmbientTrafficManager
         }
     }
 
+    // Spawns a short waypoint directly ahead of the vehicle to prevent the AI from
+    // reversing when the real destination is behind its current heading.
+    protected void SpawnNudgeWaypoint(SCR_AIGroup group)
+    {
+        if (!group) return;
+
+        IEntity vehicleEnt = null;
+        array<AIAgent> agents = {};
+        group.GetAgents(agents);
+        foreach (AIAgent agent : agents)
+        {
+            IEntity controlled = agent.GetControlledEntity();
+            if (!controlled) continue;
+            CompartmentAccessComponent access = CompartmentAccessComponent.Cast(controlled.FindComponent(CompartmentAccessComponent));
+            if (!access) continue;
+            BaseCompartmentSlot slot = access.GetCompartment();
+            if (!slot) continue;
+            vehicleEnt = slot.GetOwner();
+            break;
+        }
+
+        if (!vehicleEnt) return;
+
+        vector mat[4];
+        vehicleEnt.GetTransform(mat);
+        vector forward = mat[2];
+        forward[1] = 0;
+        forward.Normalize();
+
+        vector vehiclePos = vehicleEnt.GetOrigin();
+        vector nudgePos = vehiclePos + forward * 30.0;
+        nudgePos[1] = GetGame().GetWorld().GetSurfaceY(nudgePos[0], nudgePos[2]) + 0.5;
+
+        EntitySpawnParams nudgeParams = new EntitySpawnParams();
+        nudgeParams.Transform[3] = nudgePos;
+
+        AIWaypoint nudgeWp = AIWaypoint.Cast(
+            GetGame().SpawnEntityPrefab(Resource.Load(m_WaypointPrefab), GetGame().GetWorld(), nudgeParams)
+        );
+
+        if (nudgeWp)
+        {
+            nudgeWp.SetCompletionRadius(5.0);
+            group.AddWaypoint(nudgeWp);
+        }
+    }
+
     protected void CreateWaypointForGroup(SCR_AIGroup group, vector destPos)
     {
         SCR_AIWorld aiWorld = SCR_AIWorld.Cast(GetGame().GetAIWorld());
@@ -379,6 +426,8 @@ class SCR_AmbientTrafficManager
 
         if (!roadMgr.GetReachableWaypointInRoad(group.GetOrigin(), destPos, radius, reachablePos))
             reachablePos = destPos;
+
+        SpawnNudgeWaypoint(group);
 
         EntitySpawnParams params = new EntitySpawnParams();
         params.Transform[3] = reachablePos;
@@ -705,17 +754,20 @@ class SCR_AmbientTrafficManager
 // ------------------------------------------------------------------------------------------------
 modded class SCR_PlayerController
 {
-    protected ref SCR_AmbientTrafficManager m_TrafficManager;
+    // Static ref: shared across all PlayerController instances.
+    // Not declared with "= new ..." so the engine does not auto-construct it.
+    // Assigned on first eligible call; subsequent players see it non-null and skip.
+    protected static ref SCR_AmbientTrafficManager s_TrafficManager;
 
     override void OnControlledEntityChanged(IEntity from, IEntity to)
     {
         super.OnControlledEntityChanged(from, to);
 
-        // Initialize once when first entity is controlled, only on authority (server or local play)
-        if (!m_TrafficManager && to && (Replication.IsServer() || !Replication.IsRunning()))
+        // Initialize exactly once, regardless of how many players are connected.
+        if (!s_TrafficManager && to && (Replication.IsServer() || !Replication.IsRunning()))
         {
-            m_TrafficManager = new SCR_AmbientTrafficManager();
-            GetGame().GetCallqueue().CallLater(m_TrafficManager.Initialize, 2000, false);
+            s_TrafficManager = new SCR_AmbientTrafficManager();
+            GetGame().GetCallqueue().CallLater(s_TrafficManager.Initialize, 2000, false);
             Print("[TRAFFIC] Traffic manager created, initializing in 2s...", LogLevel.NORMAL);
         }
     }
